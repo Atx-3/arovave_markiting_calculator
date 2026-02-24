@@ -31,7 +31,6 @@ export function AdminPanel() {
         createCalculator,
         getCalculatorForCategory,
         getCategoryBreadcrumb,
-        getCategoryChildren,
     } = store;
 
     const selectedCategory = categories.find((c) => c.id === selectedCategoryId);
@@ -279,7 +278,7 @@ function SheetImporter({ calculatorId }: { calculatorId: string }) {
             const data = await file.arrayBuffer();
             const workbook = XLSX.read(data);
             const sheet = workbook.Sheets[workbook.SheetNames[0]];
-            const jsonData = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { header: 1 }) as unknown[][];
+            const jsonData = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { header: 1 }) as unknown as unknown[][];
 
             const rows = parseSheetData(jsonData);
             setPreview(rows);
@@ -314,7 +313,7 @@ function SheetImporter({ calculatorId }: { calculatorId: string }) {
             const csvText = await response.text();
             const workbook = XLSX.read(csvText, { type: 'string' });
             const sheet = workbook.Sheets[workbook.SheetNames[0]];
-            const jsonData = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { header: 1 }) as unknown[][];
+            const jsonData = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { header: 1 }) as unknown as unknown[][];
 
             const rows = parseSheetData(jsonData);
             setPreview(rows);
@@ -377,7 +376,7 @@ function SheetImporter({ calculatorId }: { calculatorId: string }) {
     const applyImport = () => {
         if (!preview) return;
 
-        for (const row of preview) {
+        for (const _row of preview) {
             store.addRow(calculatorId);
         }
 
@@ -449,6 +448,7 @@ function SheetImporter({ calculatorId }: { calculatorId: string }) {
                             accept=".xlsx,.xls,.csv"
                             onChange={handleFileUpload}
                             className="hidden"
+                            aria-label="Upload Excel or CSV file"
                         />
                         <button
                             onClick={() => fileInputRef.current?.click()}

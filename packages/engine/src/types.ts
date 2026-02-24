@@ -13,6 +13,7 @@ export type OperationType =
     | 'subtract'
     | 'multiply'
     | 'divide'
+    | 'sum'
     | 'conditional'
     | 'custom';
 
@@ -77,12 +78,41 @@ export interface SectionDefinition {
     fields: FieldDefinition[];
 }
 
+// ─── Cost Block Types ────────────────────────────────────────────────
+
+export type CostBlockType =
+    | 'area-based'
+    | 'fixed-rate'
+    | 'dropdown-rate'
+    | 'per-piece'
+    | 'aggregation';
+
+export interface CostBlockDefinition {
+    /** Unique identifier for this cost block */
+    key: string;
+    /** Human-readable label (e.g. "MS Pipe Cost") */
+    label: string;
+    /** Execution order — blocks run in ascending order */
+    orderIndex: number;
+    /** Semantic block type for UI categorization */
+    blockType: CostBlockType;
+    /** Whether this block is active (inactive blocks are skipped) */
+    isActive: boolean;
+    /** Whether this block can be toggled on/off at runtime */
+    isOptional: boolean;
+    /** The primary output variable key of this block */
+    outputKey: string;
+    /** Ordered formulas within this block */
+    formulas: FormulaDefinition[];
+}
+
 export interface TemplateSchema {
     productId: string;
     versionId: string;
     versionNumber: number;
     sections: SectionDefinition[];
     formulas: FormulaDefinition[];
+    costBlocks?: CostBlockDefinition[];
     rounding: RoundingConfig;
 }
 
@@ -113,6 +143,15 @@ export interface CalculationError {
     formula?: string;
 }
 
+export interface BlockOutput {
+    blockKey: string;
+    label: string;
+    blockType: CostBlockType;
+    outputKey: string;
+    value: string;
+    isActive: boolean;
+}
+
 export interface CalculationResult {
     success: boolean;
     outputs: Record<string, string>;  // all computed values as Decimal strings
@@ -120,6 +159,7 @@ export interface CalculationResult {
     steps: CalculationStep[];          // audit trail
     errors: CalculationError[];        // any errors encountered
     inputHash?: string;                // SHA-256 of canonical inputs
+    blockOutputs?: BlockOutput[];      // per-block output breakdown
 }
 
 // ─── Input Types ─────────────────────────────────────────────────────

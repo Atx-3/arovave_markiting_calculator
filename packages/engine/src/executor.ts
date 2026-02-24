@@ -170,6 +170,11 @@ function executeOperation(
                 result = result.dividedBy(resolvedOperands[i]);
                 break;
 
+            case 'sum':
+                // Sum is N-ary addition — accumulate all operands
+                result = result.plus(resolvedOperands[i]);
+                break;
+
             default:
                 context.errors.push({
                     code: 'INVALID_OPERATION',

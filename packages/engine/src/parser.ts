@@ -1,6 +1,7 @@
 /**
  * Schema parser — validates and normalizes a TemplateSchema.
  * Ensures all required fields are present and data types are correct.
+ * Supports cost block flattening for multi-stage execution.
  */
 
 import type {
@@ -8,6 +9,7 @@ import type {
     SectionDefinition,
     FieldDefinition,
     FormulaDefinition,
+    CostBlockDefinition,
     CalculationError,
 } from './types';
 
@@ -18,14 +20,20 @@ export interface ParseResult {
     fieldMap: Map<string, FieldDefinition>;
     formulaMap: Map<string, FormulaDefinition>;
     sortedFormulas: FormulaDefinition[];
+    /** Active cost blocks (sorted by orderIndex), used for building blockOutputs */
+    activeBlocks: CostBlockDefinition[];
 }
 
 /**
  * Parse and validate a template schema.
  * Builds lookup maps for fields and formulas.
+ * Flattens cost block formulas into the main formula list.
  * Returns sorted formulas by order_index.
  */
-export function parseSchema(schema: TemplateSchema): ParseResult {
+export function parseSchema(
+    schema: TemplateSchema,
+    blockOverrides?: Record<string, boolean>,
+): ParseResult {
     const errors: CalculationError[] = [];
     const fieldMap = new Map<string, FieldDefinition>();
     const formulaMap = new Map<string, FormulaDefinition>();
@@ -45,7 +53,7 @@ export function parseSchema(schema: TemplateSchema): ParseResult {
         }
     }
 
-    // Build formula map and sort by order_index
+    // Build formula map from standalone formulas
     const sortedFormulas: FormulaDefinition[] = [];
     if (schema.formulas) {
         for (const formula of schema.formulas) {
@@ -53,8 +61,33 @@ export function parseSchema(schema: TemplateSchema): ParseResult {
             formulaMap.set(formula.outputKey, formula);
             sortedFormulas.push(formula);
         }
-        sortedFormulas.sort((a, b) => a.orderIndex - b.orderIndex);
     }
+
+    // Flatten cost block formulas into the main formula list
+    const activeBlocks: CostBlockDefinition[] = [];
+    if (schema.costBlocks) {
+        for (const block of schema.costBlocks) {
+            validateCostBlock(block, errors);
+
+            // Determine if block is active (runtime override takes priority)
+            const isActive = blockOverrides?.[block.key] ?? block.isActive;
+            if (!isActive) continue;
+
+            activeBlocks.push(block);
+
+            // Merge block formulas into the global formula list
+            for (const formula of block.formulas) {
+                validateFormula(formula, errors);
+                formulaMap.set(formula.outputKey, formula);
+                sortedFormulas.push(formula);
+            }
+        }
+        // Sort active blocks by orderIndex for result mapping
+        activeBlocks.sort((a, b) => a.orderIndex - b.orderIndex);
+    }
+
+    // Sort all formulas (standalone + block) by orderIndex
+    sortedFormulas.sort((a, b) => a.orderIndex - b.orderIndex);
 
     return {
         valid: errors.length === 0,
@@ -63,6 +96,7 @@ export function parseSchema(schema: TemplateSchema): ParseResult {
         fieldMap,
         formulaMap,
         sortedFormulas,
+        activeBlocks,
     };
 }
 
@@ -128,7 +162,7 @@ function validateFormula(formula: FormulaDefinition, errors: CalculationError[])
         });
     }
 
-    const validOps = ['add', 'subtract', 'multiply', 'divide', 'conditional', 'custom'];
+    const validOps = ['add', 'subtract', 'multiply', 'divide', 'sum', 'conditional', 'custom'];
     if (!validOps.includes(formula.operationType)) {
         errors.push({
             code: 'INVALID_OPERATION',
@@ -154,5 +188,46 @@ function validateFormula(formula: FormulaDefinition, errors: CalculationError[])
             message: `Formula "${formula.outputKey}" has invalid order_index`,
             formula: formula.outputKey,
         });
+    }
+}
+
+function validateCostBlock(block: CostBlockDefinition, errors: CalculationError[]): void {
+    if (!block.key) {
+        errors.push({
+            code: 'INVALID_OPERATION',
+            message: 'Cost block missing key',
+        });
+    }
+
+    if (!block.outputKey) {
+        errors.push({
+            code: 'INVALID_OPERATION',
+            message: `Cost block "${block.key}" missing outputKey`,
+        });
+    }
+
+    if (block.orderIndex == null || block.orderIndex < 0) {
+        errors.push({
+            code: 'INVALID_OPERATION',
+            message: `Cost block "${block.key}" has invalid orderIndex`,
+        });
+    }
+
+    if (!block.formulas || block.formulas.length === 0) {
+        errors.push({
+            code: 'INVALID_OPERATION',
+            message: `Cost block "${block.key}" has no formulas`,
+        });
+    }
+
+    // Verify the block's outputKey exists as one of its formula outputs
+    if (block.formulas && block.formulas.length > 0) {
+        const formulaOutputKeys = block.formulas.map((f) => f.outputKey);
+        if (!formulaOutputKeys.includes(block.outputKey)) {
+            errors.push({
+                code: 'INVALID_OPERATION',
+                message: `Cost block "${block.key}" outputKey "${block.outputKey}" does not match any of its formula outputs`,
+            });
+        }
     }
 }

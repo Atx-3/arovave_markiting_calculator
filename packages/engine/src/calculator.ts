@@ -3,13 +3,14 @@
  * This is the single entry point for all pricing calculations.
  *
  * Pipeline:
- *   1. Parse schema → validate structure
+ *   1. Parse schema → validate structure → flatten cost blocks
  *   2. Validate inputs → check required fields, types
  *   3. Build dependency graph → detect circular references
  *   4. Initialize context → resolve inputs + defaults
  *   5. Execute formulas in order → produce outputs
  *   6. Apply final rounding → produce total
- *   7. Return deterministic result with audit trail
+ *   7. Build block-level output breakdown
+ *   8. Return deterministic result with audit trail
  *
  * Guarantees:
  *   - Same input + same schema = identical output (deterministic)
@@ -24,6 +25,7 @@ import type {
     InputValues,
     CalculationResult,
     CalculationError,
+    BlockOutput,
 } from './types';
 import { parseSchema } from './parser';
 import { validateInputs } from './validator';
@@ -64,16 +66,18 @@ function computeInputHash(versionId: string, inputs: InputValues): string {
  *
  * @param schema - The product template schema (from published version)
  * @param inputs - User-provided input values (field key → value string)
+ * @param blockOverrides - Optional runtime overrides for block activation (block key → boolean)
  * @returns Deterministic calculation result with audit trail
  */
 export function calculate(
     schema: TemplateSchema,
     inputs: InputValues,
+    blockOverrides?: Record<string, boolean>,
 ): CalculationResult {
     const allErrors: CalculationError[] = [];
 
-    // ─── Step 1: Parse schema ────────────────────────────────────────
-    const parsed = parseSchema(schema);
+    // ─── Step 1: Parse schema + flatten cost blocks ──────────────────
+    const parsed = parseSchema(schema, blockOverrides);
     if (!parsed.valid) {
         return {
             success: false,
@@ -169,7 +173,23 @@ export function calculate(
 
     const finalTotal = applyRounding(total, schema.rounding).toString();
 
-    // ─── Step 8: Compute input hash ──────────────────────────────────
+    // ─── Step 8: Build block-level output breakdown ──────────────────
+    const blockOutputs: BlockOutput[] = [];
+    if (parsed.activeBlocks.length > 0) {
+        for (const block of parsed.activeBlocks) {
+            const value = context.values.get(block.outputKey);
+            blockOutputs.push({
+                blockKey: block.key,
+                label: block.label,
+                blockType: block.blockType,
+                outputKey: block.outputKey,
+                value: value ? applyRounding(value, schema.rounding).toString() : '0',
+                isActive: true,
+            });
+        }
+    }
+
+    // ─── Step 9: Compute input hash ──────────────────────────────────
     const inputHash = computeInputHash(schema.versionId, inputs);
 
     return {
@@ -179,5 +199,7 @@ export function calculate(
         steps: context.steps,
         errors: allErrors,
         inputHash,
+        blockOutputs: blockOutputs.length > 0 ? blockOutputs : undefined,
     };
 }
+
