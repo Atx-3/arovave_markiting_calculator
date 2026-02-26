@@ -22,9 +22,15 @@ export interface DropdownOption {
     rate: string; // Decimal string
 }
 
+export type FormulaToken = {
+    type: 'field' | 'operator' | 'number' | 'bracket';
+    value: string;
+};
+
 export interface RowFormula {
-    operands: string[]; // row keys or literal numbers
-    operation: Operation;
+    operands: string[]; // row keys or literal numbers (legacy, kept for backward compat)
+    operation: Operation; // legacy single-operator
+    tokens?: FormulaToken[]; // full infix expression with brackets & mixed operators
 }
 
 export interface CalculatorRow {

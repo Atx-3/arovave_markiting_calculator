@@ -292,7 +292,7 @@ function FormulaBar({ calculatorId }: { calculatorId: string }) {
     const calculator = store.calculators.find((c) => c.id === calculatorId);
     if (!calculator) return null;
 
-    const [tokens, setTokens] = useState<{ type: 'field' | 'operator' | 'number'; value: string }[]>([]);
+    const [tokens, setTokens] = useState<{ type: 'field' | 'operator' | 'number' | 'bracket'; value: string }[]>([]);
     const [showMoreOps, setShowMoreOps] = useState(false);
     const [resultLabel, setResultLabel] = useState('');
     const [numberInput, setNumberInput] = useState('');
@@ -311,8 +311,39 @@ function FormulaBar({ calculatorId }: { calculatorId: string }) {
 
     const allFields = [...inputFields, ...formulaFields];
 
+    // Bracket tracking
+    const openBrackets = tokens.filter((t) => t.type === 'bracket' && t.value === '(').length;
+    const closeBrackets = tokens.filter((t) => t.type === 'bracket' && t.value === ')').length;
+    const unclosedBrackets = openBrackets - closeBrackets;
+
+    // What can be inserted next? Based on last token
+    const lastToken = tokens[tokens.length - 1];
+    const lastType = lastToken?.type;
+    const lastValue = lastToken?.value;
+
+    // After nothing / after operator / after '(' → expect field, number, or '('
+    const expectingValue = tokens.length === 0
+        || lastType === 'operator'
+        || (lastType === 'bracket' && lastValue === '(');
+
+    // After field / number / ')' → expect operator or ')'
+    const expectingOperator = lastType === 'field'
+        || lastType === 'number'
+        || (lastType === 'bracket' && lastValue === ')');
+
+    // Can add '(' when expecting a value
+    const canOpenBracket = expectingValue;
+
+    // Can add ')' when expecting an operator AND there are unclosed brackets
+    const canCloseBracket = expectingOperator && unclosedBrackets > 0;
+
+    // Can finish when: expecting operator, no unclosed brackets, at least 3 tokens
+    const nonBracketTokens = tokens.filter((t) => t.type !== 'bracket').length;
+    const canFinish = expectingOperator && unclosedBrackets === 0 && nonBracketTokens >= 3;
+
     const addField = (key: string) => setTokens([...tokens, { type: 'field', value: key }]);
     const addOperator = (op: string) => setTokens([...tokens, { type: 'operator', value: op }]);
+    const addBracket = (bracket: '(' | ')') => setTokens([...tokens, { type: 'bracket', value: bracket }]);
     const addNumber = () => {
         if (!numberInput.trim()) return;
         setTokens([...tokens, { type: 'number', value: numberInput.trim() }]);
@@ -321,10 +352,11 @@ function FormulaBar({ calculatorId }: { calculatorId: string }) {
     const removeToken = (index: number) => setTokens(tokens.filter((_, i) => i !== index));
     const clearTokens = () => { setTokens([]); setResultLabel(''); setNumberInput(''); };
 
-    // Save formula — creates a new calculated row
+    // Save formula — creates a new calculated row with full token stream
     const finishFormula = () => {
-        if (tokens.length < 3 || !resultLabel.trim()) return;
+        if (!canFinish || !resultLabel.trim()) return;
 
+        // Legacy fields for backward compat
         const operands = tokens.filter((t) => t.type === 'field' || t.type === 'number').map((t) => t.value);
         const operators = tokens.filter((t) => t.type === 'operator');
         const mainOp = operators.length > 0 ? operators[0].value : '+';
@@ -333,21 +365,24 @@ function FormulaBar({ calculatorId }: { calculatorId: string }) {
             calculatorId,
             resultLabel.trim(),
             labelToKey(resultLabel.trim()),
-            { operands, operation: mainOp as Operation }
+            { operands, operation: mainOp as Operation, tokens: [...tokens] }
         );
 
         setTokens([]);
         setResultLabel('');
     };
 
-    const lastToken = tokens[tokens.length - 1];
-    const expectingField = tokens.length === 0 || lastToken?.type === 'operator';
-    const expectingOperator = lastToken?.type === 'field' || lastToken?.type === 'number';
-    const canFinish = tokens.length >= 3 && expectingOperator;
-
     const getFieldLabel = (key: string) => {
         const field = allFields.find((f) => f.key === key);
         return field?.label || key;
+    };
+
+    // Helper text for what to do next
+    const getHintText = () => {
+        if (expectingValue) return 'Pick a field, formula result, type a number, or add (';
+        if (canCloseBracket) return 'Pick an operator or close bracket )';
+        if (expectingOperator) return 'Pick an operator';
+        return '';
     };
 
     return (
@@ -369,18 +404,43 @@ function FormulaBar({ calculatorId }: { calculatorId: string }) {
                                 {fi + 1}
                             </span>
                             <div className="flex items-center gap-1 flex-wrap flex-1">
-                                {formula.formula && formula.formula.operands.map((operand, i) => (
-                                    <span key={i} className="flex items-center gap-1">
-                                        {i > 0 && (
-                                            <span className="px-2 py-0.5 rounded-lg bg-black/[0.04] text-black font-bold text-sm">
-                                                {formula.formula!.operation}
-                                            </span>
-                                        )}
-                                        <span className="px-2 py-0.5 rounded-lg bg-black/5 text-black border border-black/10 text-xs font-medium">
-                                            {getFieldLabel(operand)}
+                                {formula.formula && (formula.formula.tokens || []).length > 0
+                                    ? /* Render from tokens (new system with brackets) */
+                                    formula.formula.tokens!.map((tok, i) => (
+                                        <span key={i}>
+                                            {tok.type === 'field' ? (
+                                                <span className="px-2 py-0.5 rounded-lg bg-black/5 text-black border border-black/10 text-xs font-medium">
+                                                    {getFieldLabel(tok.value)}
+                                                </span>
+                                            ) : tok.type === 'number' ? (
+                                                <span className="px-2 py-0.5 rounded-lg bg-blue-50 text-blue-800 border border-blue-200 text-xs font-medium">
+                                                    {tok.value}
+                                                </span>
+                                            ) : tok.type === 'operator' ? (
+                                                <span className="px-2 py-0.5 rounded-lg bg-black/[0.04] text-black font-bold text-sm">
+                                                    {tok.value}
+                                                </span>
+                                            ) : tok.type === 'bracket' ? (
+                                                <span className="px-1.5 py-0.5 text-purple-600 font-bold text-base">
+                                                    {tok.value}
+                                                </span>
+                                            ) : null}
                                         </span>
-                                    </span>
-                                ))}
+                                    ))
+                                    : /* Fallback: render from legacy operands (old formulas) */
+                                    formula.formula && formula.formula.operands.map((operand, i) => (
+                                        <span key={i} className="flex items-center gap-1">
+                                            {i > 0 && (
+                                                <span className="px-2 py-0.5 rounded-lg bg-black/[0.04] text-black font-bold text-sm">
+                                                    {formula.formula!.operation}
+                                                </span>
+                                            )}
+                                            <span className="px-2 py-0.5 rounded-lg bg-black/5 text-black border border-black/10 text-xs font-medium">
+                                                {getFieldLabel(operand)}
+                                            </span>
+                                        </span>
+                                    ))
+                                }
                             </div>
                             <span className="px-2 py-0.5 rounded-lg bg-black/[0.06] text-black font-bold text-sm">=</span>
                             <span className="text-sm font-semibold text-black shrink-0">{formula.label}</span>
@@ -432,7 +492,9 @@ function FormulaBar({ calculatorId }: { calculatorId: string }) {
                                 ? 'bg-black/5 text-black border border-black/15'
                                 : token.type === 'number'
                                     ? 'bg-blue-50 text-blue-800 border border-blue-200'
-                                    : 'bg-black/5 text-black font-bold text-base px-3'
+                                    : token.type === 'bracket'
+                                        ? 'bg-purple-50 text-purple-700 border border-purple-200 font-bold text-base px-3'
+                                        : 'bg-black/5 text-black font-bold text-base px-3'
                                 }`}
                         >
                             {token.type === 'field'
@@ -453,18 +515,25 @@ function FormulaBar({ calculatorId }: { calculatorId: string }) {
                     )}
                 </div>
 
+                {/* Bracket indicator */}
+                {unclosedBrackets > 0 && (
+                    <div className="text-xs text-purple-500 flex items-center gap-1">
+                        <span className="font-bold">{unclosedBrackets}</span> unclosed bracket{unclosedBrackets > 1 ? 's' : ''} — add <span className="font-bold font-mono">)</span> to close
+                    </div>
+                )}
+
                 {/* Field & formula output buttons */}
                 <div className="space-y-2">
                     <span className="text-[10px] text-black/50 uppercase tracking-wider">
-                        {expectingField ? '▸ Pick a field or formula result:' : expectingOperator ? '▸ Pick an operator:' : 'Fields:'}
+                        {expectingValue ? '▸ Pick a field or formula result:' : expectingOperator ? '▸ Pick an operator:' : 'Fields:'}
                     </span>
                     <div className="flex flex-wrap gap-1.5">
                         {inputFields.map((field) => (
                             <button
                                 key={field.key}
                                 onClick={() => addField(field.key)}
-                                disabled={!expectingField}
-                                className={`px-3 py-1.5 rounded-xl text-sm font-semibold transition-all ${expectingField
+                                disabled={!expectingValue}
+                                className={`px-3 py-1.5 rounded-xl text-sm font-semibold transition-all ${expectingValue
                                     ? 'bg-black/5 border border-black/10 text-black hover:bg-black/10 cursor-pointer'
                                     : 'bg-white border border-black/5 text-black/30 cursor-not-allowed'
                                     }`}
@@ -476,8 +545,8 @@ function FormulaBar({ calculatorId }: { calculatorId: string }) {
                             <button
                                 key={field.key}
                                 onClick={() => addField(field.key)}
-                                disabled={!expectingField}
-                                className={`px-3 py-1.5 rounded-xl text-sm font-semibold transition-all ${expectingField
+                                disabled={!expectingValue}
+                                className={`px-3 py-1.5 rounded-xl text-sm font-semibold transition-all ${expectingValue
                                     ? 'bg-green-50 border border-green-200 text-green-800 hover:bg-green-100 cursor-pointer'
                                     : 'bg-white border border-black/5 text-black/30 cursor-not-allowed'
                                     }`}
@@ -489,7 +558,7 @@ function FormulaBar({ calculatorId }: { calculatorId: string }) {
                     </div>
 
                     {/* Number input — for literals like "18", "1.18", "100" */}
-                    {expectingField && (
+                    {expectingValue && (
                         <div className="flex items-center gap-2">
                             <input
                                 type="text"
@@ -511,8 +580,36 @@ function FormulaBar({ calculatorId }: { calculatorId: string }) {
                     )}
                 </div>
 
-                {/* Operators */}
+                {/* Brackets + Operators */}
                 <div className="flex flex-wrap gap-1.5">
+                    {/* Open bracket */}
+                    <button
+                        onClick={() => addBracket('(')}
+                        disabled={!canOpenBracket}
+                        className={`w-10 h-10 rounded-xl font-bold text-lg flex items-center justify-center transition-all ${canOpenBracket
+                            ? 'bg-purple-50 border border-purple-200 text-purple-600 hover:bg-purple-100 cursor-pointer'
+                            : 'bg-white border border-black/5 text-black/20 cursor-not-allowed'
+                            }`}
+                        title="Open bracket"
+                    >
+                        (
+                    </button>
+
+                    {/* Close bracket */}
+                    <button
+                        onClick={() => addBracket(')')}
+                        disabled={!canCloseBracket}
+                        className={`w-10 h-10 rounded-xl font-bold text-lg flex items-center justify-center transition-all ${canCloseBracket
+                            ? 'bg-purple-50 border border-purple-200 text-purple-600 hover:bg-purple-100 cursor-pointer'
+                            : 'bg-white border border-black/5 text-black/20 cursor-not-allowed'
+                            }`}
+                        title="Close bracket"
+                    >
+                        )
+                    </button>
+
+                    <div className="w-px bg-black/10 mx-1 self-stretch" />
+
                     {COMMON_OPERATORS.map((op) => (
                         <button
                             key={op.symbol}
@@ -580,7 +677,7 @@ function FormulaBar({ calculatorId }: { calculatorId: string }) {
                 {tokens.length > 0 && tokens.length < 3 && (
                     <p className="text-[11px] text-black/40 flex items-center gap-1">
                         <ChevronRight className="w-3 h-3" />
-                        {expectingField ? 'Now pick a field, formula result, or type a number' : 'Now pick an operator'} to continue...
+                        {expectingValue ? 'Now pick a field, formula result, or type a number' : 'Now pick an operator'} to continue...
                     </p>
                 )}
             </div>

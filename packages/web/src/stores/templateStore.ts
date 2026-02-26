@@ -17,6 +17,7 @@ import type {
     CostBlock,
     CostBlockType,
     BlockFormula,
+    RowFormula, // Added RowFormula to imports
 } from '../types/calculator';
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -44,7 +45,7 @@ interface AppStore {
 
     // ── Calculator Rows ──
     addRow: (calculatorId: string) => void;
-    addCalculatedRow: (calculatorId: string, label: string, key: string, formula: { operands: string[]; operation: Operation }) => void;
+    addCalculatedRow: (calculatorId: string, label: string, key: string, formula: RowFormula) => void;
     removeRow: (calculatorId: string, rowId: string) => void;
     updateRow: (calculatorId: string, rowId: string, updates: Partial<CalculatorRow>) => void;
     moveRow: (calculatorId: string, rowId: string, direction: 'up' | 'down') => void;
