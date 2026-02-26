@@ -619,60 +619,128 @@ export const useAppStore = create<AppStore>()(
                             const option = row.dropdownOptions?.find((o) => o.value === selectedValue);
                             rowResults[row.key] = option?.rate || '0';
                         } else if (row.type === 'calculated' && row.formula) {
-                            const { operands, operation } = row.formula;
-                            if (operands.length === 0) {
-                                rowResults[row.key] = '0';
-                                continue;
-                            }
-
-                            let result = new Decimal(resolveOperand(operands[0], rowResults, calculator.rows));
-                            const op = operation as string;
-
-                            // Handle unary operators first (only use first operand)
-                            if (op === '√') {
-                                result = result.sqrt();
-                            } else if (op === 'abs') {
-                                result = result.abs();
-                            } else if (op === 'round') {
-                                result = result.round();
-                            } else if (op === 'ceil') {
-                                result = Decimal.ceil(result);
-                            } else if (op === 'floor') {
-                                result = Decimal.floor(result);
-                            } else if (op === 'min') {
-                                for (let i = 1; i < operands.length; i++) {
-                                    const val = new Decimal(resolveOperand(operands[i], rowResults, calculator.rows));
-                                    result = Decimal.min(result, val);
-                                }
-                            } else if (op === 'max') {
-                                for (let i = 1; i < operands.length; i++) {
-                                    const val = new Decimal(resolveOperand(operands[i], rowResults, calculator.rows));
-                                    result = Decimal.max(result, val);
-                                }
-                            } else if (op === 'avg') {
-                                for (let i = 1; i < operands.length; i++) {
-                                    const val = new Decimal(resolveOperand(operands[i], rowResults, calculator.rows));
-                                    result = result.plus(val);
-                                }
-                                result = result.dividedBy(operands.length);
-                            } else {
-                                // Binary operators: applied sequentially
-                                for (let i = 1; i < operands.length; i++) {
-                                    const val = new Decimal(resolveOperand(operands[i], rowResults, calculator.rows));
+                            // ── Token-based formula evaluation (new system with brackets) ──
+                            if (row.formula.tokens && row.formula.tokens.length > 0) {
+                                const evalTokens = row.formula.tokens;
+                                // Shunting-yard algorithm for proper bracket & precedence handling
+                                const precedence = (op: string): number => {
+                                    if (op === '+' || op === '-' || op === '−') return 1;
+                                    if (op === '×' || op === '*' || op === '÷' || op === '/' || op === '%') return 2;
+                                    if (op === '^') return 3;
+                                    return 0;
+                                };
+                                const applyOp = (a: Decimal, b: Decimal, op: string): Decimal => {
                                     switch (op) {
-                                        case '+': result = result.plus(val); break;
+                                        case '+': return a.plus(b);
                                         case '-':
-                                        case '−': result = result.minus(val); break;
+                                        case '−': return a.minus(b);
                                         case '×':
-                                        case '*': result = result.times(val); break;
+                                        case '*': return a.times(b);
                                         case '÷':
-                                        case '/': result = val.isZero() ? result : result.dividedBy(val); break;
-                                        case '%': result = result.times(val).dividedBy(100); break;
-                                        case '^': result = result.pow(val); break;
+                                        case '/': return b.isZero() ? a : a.dividedBy(b);
+                                        case '%': return a.times(b).dividedBy(100);
+                                        case '^': return a.pow(b);
+                                        default: return a;
+                                    }
+                                };
+
+                                const values: Decimal[] = [];
+                                const ops: string[] = [];
+
+                                const processOp = () => {
+                                    const op = ops.pop()!;
+                                    const b = values.pop()!;
+                                    const a = values.pop()!;
+                                    values.push(applyOp(a, b, op));
+                                };
+
+                                for (const tok of evalTokens) {
+                                    if (tok.type === 'field' || tok.type === 'number') {
+                                        const val = tok.type === 'number'
+                                            ? tok.value
+                                            : resolveOperand(tok.value, rowResults, calculator.rows);
+                                        values.push(new Decimal(val || '0'));
+                                    } else if (tok.type === 'bracket' && tok.value === '(') {
+                                        ops.push('(');
+                                    } else if (tok.type === 'bracket' && tok.value === ')') {
+                                        while (ops.length > 0 && ops[ops.length - 1] !== '(') {
+                                            processOp();
+                                        }
+                                        ops.pop(); // remove '('
+                                    } else if (tok.type === 'operator') {
+                                        while (
+                                            ops.length > 0 &&
+                                            ops[ops.length - 1] !== '(' &&
+                                            precedence(ops[ops.length - 1]) >= precedence(tok.value)
+                                        ) {
+                                            processOp();
+                                        }
+                                        ops.push(tok.value);
                                     }
                                 }
+                                while (ops.length > 0) {
+                                    processOp();
+                                }
+
+                                const result = values.length > 0 ? values[0] : new Decimal(0);
+                                rowResults[row.key] = result.toDecimalPlaces(2).toString();
+                            } else {
+                                // ── Legacy formula evaluation (operands + single operation) ──
+                                const { operands, operation } = row.formula;
+                                if (operands.length === 0) {
+                                    rowResults[row.key] = '0';
+                                    continue;
+                                }
+
+                                let result = new Decimal(resolveOperand(operands[0], rowResults, calculator.rows));
+                                const op = operation as string;
+
+                                // Handle unary operators first (only use first operand)
+                                if (op === '√') {
+                                    result = result.sqrt();
+                                } else if (op === 'abs') {
+                                    result = result.abs();
+                                } else if (op === 'round') {
+                                    result = result.round();
+                                } else if (op === 'ceil') {
+                                    result = Decimal.ceil(result);
+                                } else if (op === 'floor') {
+                                    result = Decimal.floor(result);
+                                } else if (op === 'min') {
+                                    for (let i = 1; i < operands.length; i++) {
+                                        const val = new Decimal(resolveOperand(operands[i], rowResults, calculator.rows));
+                                        result = Decimal.min(result, val);
+                                    }
+                                } else if (op === 'max') {
+                                    for (let i = 1; i < operands.length; i++) {
+                                        const val = new Decimal(resolveOperand(operands[i], rowResults, calculator.rows));
+                                        result = Decimal.max(result, val);
+                                    }
+                                } else if (op === 'avg') {
+                                    for (let i = 1; i < operands.length; i++) {
+                                        const val = new Decimal(resolveOperand(operands[i], rowResults, calculator.rows));
+                                        result = result.plus(val);
+                                    }
+                                    result = result.dividedBy(operands.length);
+                                } else {
+                                    // Binary operators: applied sequentially
+                                    for (let i = 1; i < operands.length; i++) {
+                                        const val = new Decimal(resolveOperand(operands[i], rowResults, calculator.rows));
+                                        switch (op) {
+                                            case '+': result = result.plus(val); break;
+                                            case '-':
+                                            case '−': result = result.minus(val); break;
+                                            case '×':
+                                            case '*': result = result.times(val); break;
+                                            case '÷':
+                                            case '/': result = val.isZero() ? result : result.dividedBy(val); break;
+                                            case '%': result = result.times(val).dividedBy(100); break;
+                                            case '^': result = result.pow(val); break;
+                                        }
+                                    }
+                                }
+                                rowResults[row.key] = result.toDecimalPlaces(2).toString();
                             }
-                            rowResults[row.key] = result.toDecimalPlaces(2).toString();
                         }
                     } catch {
                         rowResults[row.key] = '0';

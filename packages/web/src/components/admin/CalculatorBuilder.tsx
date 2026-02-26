@@ -377,14 +377,6 @@ function FormulaBar({ calculatorId }: { calculatorId: string }) {
         return field?.label || key;
     };
 
-    // Helper text for what to do next
-    const getHintText = () => {
-        if (expectingValue) return 'Pick a field, formula result, type a number, or add (';
-        if (canCloseBracket) return 'Pick an operator or close bracket )';
-        if (expectingOperator) return 'Pick an operator';
-        return '';
-    };
-
     return (
         <div className="glass rounded-2xl border border-black/10 p-4 space-y-4">
             <div className="flex items-center justify-between">
