@@ -40,6 +40,38 @@ export interface CalculatorRow {
     isRequired?: boolean;
 }
 
+// ─── Cost Blocks (Multi-Stage Pricing) ────────────────────────────────
+
+export type CostBlockType =
+    | 'area-based'
+    | 'fixed-rate'
+    | 'dropdown-rate'
+    | 'per-piece'
+    | 'aggregation';
+
+export type BlockOperation = '+' | '-' | '×' | '÷' | 'sum';
+
+export interface BlockFormula {
+    id: string;
+    outputKey: string;
+    label: string;
+    operationType: BlockOperation;
+    operands: string[];   // row keys, literal numbers, or earlier formula outputKeys
+    orderIndex: number;
+}
+
+export interface CostBlock {
+    id: string;
+    key: string;
+    label: string;
+    orderIndex: number;
+    blockType: CostBlockType;
+    isActive: boolean;
+    isOptional: boolean;
+    outputKey: string;    // must match one of its formulas' outputKey
+    formulas: BlockFormula[];
+}
+
 // ─── Calculator ───────────────────────────────────────────────────────
 
 export interface Calculator {
@@ -47,6 +79,7 @@ export interface Calculator {
     name: string;
     categoryId: string;
     rows: CalculatorRow[];
+    costBlocks: CostBlock[];
     tempItems: TempItem[]; // each calculator has its own temp list
 }
 

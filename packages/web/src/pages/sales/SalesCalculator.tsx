@@ -264,6 +264,29 @@ export function SalesCalculator() {
                                     })}
                                 </div>
 
+                                {/* Cost Block Breakdown */}
+                                {result?.blockResults && result.blockResults.length > 0 && (
+                                    <div className="border-t border-surface-border">
+                                        <div className="px-4 py-2 text-sm font-semibold text-black bg-black/[0.02] flex items-center gap-2">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-black/30" />
+                                            Cost Breakdown
+                                        </div>
+                                        {result.blockResults.map((block) => (
+                                            <div
+                                                key={block.blockKey}
+                                                className="px-4 py-2.5 flex items-center justify-between border-t border-surface-border/50"
+                                            >
+                                                <span className="text-base text-black">
+                                                    {block.label}
+                                                </span>
+                                                <span className="text-base font-mono font-semibold text-black">
+                                                    ₹{block.value}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
                                 {/* User temp items */}
                                 {userTempItems.length > 0 && (
                                     <div className="border-t border-surface-border">

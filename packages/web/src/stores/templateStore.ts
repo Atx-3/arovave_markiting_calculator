@@ -14,6 +14,9 @@ import type {
     RowType,
     Operation,
     TempItem,
+    CostBlock,
+    CostBlockType,
+    BlockFormula,
 } from '../types/calculator';
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -45,6 +48,7 @@ interface AppStore {
     removeRow: (calculatorId: string, rowId: string) => void;
     updateRow: (calculatorId: string, rowId: string, updates: Partial<CalculatorRow>) => void;
     moveRow: (calculatorId: string, rowId: string, direction: 'up' | 'down') => void;
+    setGrandTotalRow: (calculatorId: string, rowId: string) => void;
 
     // ── Dropdown Options ──
     addDropdownOption: (calculatorId: string, rowId: string) => void;
@@ -65,6 +69,15 @@ interface AppStore {
     addFormulaOperand: (calculatorId: string, rowId: string, operand: string) => void;
     removeFormulaOperand: (calculatorId: string, rowId: string, operandIndex: number) => void;
 
+    // ── Cost Blocks ──
+    addCostBlock: (calculatorId: string, label: string, blockType: CostBlockType) => void;
+    updateCostBlock: (calculatorId: string, blockId: string, updates: Partial<CostBlock>) => void;
+    removeCostBlock: (calculatorId: string, blockId: string) => void;
+    moveCostBlock: (calculatorId: string, blockId: string, direction: 'up' | 'down') => void;
+    addBlockFormula: (calculatorId: string, blockId: string, formula: Omit<BlockFormula, 'id'>) => void;
+    updateBlockFormula: (calculatorId: string, blockId: string, formulaId: string, updates: Partial<BlockFormula>) => void;
+    removeBlockFormula: (calculatorId: string, blockId: string, formulaId: string) => void;
+
     // ── Temp Items (per-calculator reference list) ──
     addTempItem: (calculatorId: string, name: string, rate: string) => void;
     removeTempItem: (calculatorId: string, itemId: string) => void;
@@ -76,7 +89,7 @@ interface AppStore {
         inputs: Record<string, string>,
         selectedDropdowns: Record<string, string>,
         userTempItems: { name: string; rate: string }[]
-    ) => { rowResults: Record<string, string>; total: string };
+    ) => { rowResults: Record<string, string>; total: string; blockResults?: { blockKey: string; label: string; value: string; isActive: boolean }[] };
 }
 
 // ─── Store Implementation ────────────────────────────────────────────
@@ -153,6 +166,7 @@ export const useAppStore = create<AppStore>()(
                     name,
                     categoryId,
                     rows: [],
+                    costBlocks: [],
                     tempItems: [],
                 };
                 set((s) => ({
@@ -197,22 +211,38 @@ export const useAppStore = create<AppStore>()(
 
             addCalculatedRow: (calculatorId, label, key, formula) =>
                 set((s) => ({
+                    calculators: s.calculators.map((calc) => {
+                        if (calc.id !== calculatorId) return calc;
+                        // Only auto-set isTotal if no other row already has it
+                        const hasExistingTotal = calc.rows.some((r) => r.isTotal);
+                        return {
+                            ...calc,
+                            rows: [
+                                ...calc.rows,
+                                {
+                                    id: uid(),
+                                    order: calc.rows.length + 1,
+                                    label,
+                                    key,
+                                    type: 'calculated' as RowType,
+                                    formula,
+                                    isTotal: !hasExistingTotal,
+                                },
+                            ],
+                        };
+                    }),
+                })),
+
+            setGrandTotalRow: (calculatorId, rowId) =>
+                set((s) => ({
                     calculators: s.calculators.map((calc) =>
                         calc.id === calculatorId
                             ? {
                                 ...calc,
-                                rows: [
-                                    ...calc.rows,
-                                    {
-                                        id: uid(),
-                                        order: calc.rows.length + 1,
-                                        label,
-                                        key,
-                                        type: 'calculated' as RowType,
-                                        formula,
-                                        isTotal: true,
-                                    },
-                                ],
+                                rows: calc.rows.map((r) => ({
+                                    ...r,
+                                    isTotal: r.id === rowId,
+                                })),
                             }
                             : calc
                     ),
@@ -430,13 +460,151 @@ export const useAppStore = create<AppStore>()(
                 })),
 
             // ══════════════════════════════════════════════════════════════════
+            // COST BLOCKS
+            // ══════════════════════════════════════════════════════════════════
+
+            addCostBlock: (calculatorId, label, blockType) => {
+                const key = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'block';
+                set((s) => ({
+                    calculators: s.calculators.map((calc) => {
+                        if (calc.id !== calculatorId) return calc;
+                        const blocks = calc.costBlocks || [];
+                        const newBlock: CostBlock = {
+                            id: uid(),
+                            key: `${key}_${blocks.length + 1}`,
+                            label,
+                            orderIndex: blocks.length + 1,
+                            blockType,
+                            isActive: true,
+                            isOptional: false,
+                            outputKey: '',
+                            formulas: [],
+                        };
+                        return { ...calc, costBlocks: [...blocks, newBlock] };
+                    }),
+                }));
+            },
+
+            updateCostBlock: (calculatorId, blockId, updates) =>
+                set((s) => ({
+                    calculators: s.calculators.map((calc) =>
+                        calc.id === calculatorId
+                            ? {
+                                ...calc,
+                                costBlocks: (calc.costBlocks || []).map((b) =>
+                                    b.id === blockId ? { ...b, ...updates } : b
+                                ),
+                            }
+                            : calc
+                    ),
+                })),
+
+            removeCostBlock: (calculatorId, blockId) =>
+                set((s) => ({
+                    calculators: s.calculators.map((calc) =>
+                        calc.id === calculatorId
+                            ? {
+                                ...calc,
+                                costBlocks: (calc.costBlocks || [])
+                                    .filter((b) => b.id !== blockId)
+                                    .map((b, i) => ({ ...b, orderIndex: i + 1 })),
+                            }
+                            : calc
+                    ),
+                })),
+
+            moveCostBlock: (calculatorId, blockId, direction) =>
+                set((s) => ({
+                    calculators: s.calculators.map((calc) => {
+                        if (calc.id !== calculatorId) return calc;
+                        const blocks = [...(calc.costBlocks || [])];
+                        const index = blocks.findIndex((b) => b.id === blockId);
+                        if (index < 0) return calc;
+                        const target = direction === 'up' ? index - 1 : index + 1;
+                        if (target < 0 || target >= blocks.length) return calc;
+                        [blocks[index], blocks[target]] = [blocks[target], blocks[index]];
+                        return {
+                            ...calc,
+                            costBlocks: blocks.map((b, i) => ({ ...b, orderIndex: i + 1 })),
+                        };
+                    }),
+                })),
+
+            addBlockFormula: (calculatorId, blockId, formula) =>
+                set((s) => ({
+                    calculators: s.calculators.map((calc) =>
+                        calc.id === calculatorId
+                            ? {
+                                ...calc,
+                                costBlocks: (calc.costBlocks || []).map((b) => {
+                                    if (b.id !== blockId) return b;
+                                    const newFormula: BlockFormula = { ...formula, id: uid() };
+                                    const updatedFormulas = [...b.formulas, newFormula];
+                                    return {
+                                        ...b,
+                                        formulas: updatedFormulas,
+                                        // Auto-set outputKey to the last formula's outputKey
+                                        outputKey: newFormula.outputKey,
+                                    };
+                                }),
+                            }
+                            : calc
+                    ),
+                })),
+
+            updateBlockFormula: (calculatorId, blockId, formulaId, updates) =>
+                set((s) => ({
+                    calculators: s.calculators.map((calc) =>
+                        calc.id === calculatorId
+                            ? {
+                                ...calc,
+                                costBlocks: (calc.costBlocks || []).map((b) =>
+                                    b.id === blockId
+                                        ? {
+                                            ...b,
+                                            formulas: b.formulas.map((f) =>
+                                                f.id === formulaId ? { ...f, ...updates } : f
+                                            ),
+                                        }
+                                        : b
+                                ),
+                            }
+                            : calc
+                    ),
+                })),
+
+            removeBlockFormula: (calculatorId, blockId, formulaId) =>
+                set((s) => ({
+                    calculators: s.calculators.map((calc) =>
+                        calc.id === calculatorId
+                            ? {
+                                ...calc,
+                                costBlocks: (calc.costBlocks || []).map((b) => {
+                                    if (b.id !== blockId) return b;
+                                    const updatedFormulas = b.formulas
+                                        .filter((f) => f.id !== formulaId)
+                                        .map((f, i) => ({ ...f, orderIndex: i + 1 }));
+                                    return {
+                                        ...b,
+                                        formulas: updatedFormulas,
+                                        outputKey: updatedFormulas.length > 0
+                                            ? updatedFormulas[updatedFormulas.length - 1].outputKey
+                                            : '',
+                                    };
+                                }),
+                            }
+                            : calc
+                    ),
+                })),
+
+            // ══════════════════════════════════════════════════════════════════
             // CALCULATION ENGINE
             // ══════════════════════════════════════════════════════════════════
 
             calculateResult: (calculator, inputs, selectedDropdowns, userTempItems) => {
                 const rowResults: Record<string, string> = {};
 
-                // Process rows in order
+                // Process rows in order (same as before)
                 for (const row of calculator.rows) {
                     if (!row.key) continue;
 
@@ -457,17 +625,50 @@ export const useAppStore = create<AppStore>()(
                             }
 
                             let result = new Decimal(resolveOperand(operands[0], rowResults, calculator.rows));
-                            for (let i = 1; i < operands.length; i++) {
-                                const val = new Decimal(resolveOperand(operands[i], rowResults, calculator.rows));
-                                const op = operation as string;
-                                switch (op) {
-                                    case '+': result = result.plus(val); break;
-                                    case '-':
-                                    case '−': result = result.minus(val); break;
-                                    case '×':
-                                    case '*': result = result.times(val); break;
-                                    case '÷':
-                                    case '/': result = val.isZero() ? result : result.dividedBy(val); break;
+                            const op = operation as string;
+
+                            // Handle unary operators first (only use first operand)
+                            if (op === '√') {
+                                result = result.sqrt();
+                            } else if (op === 'abs') {
+                                result = result.abs();
+                            } else if (op === 'round') {
+                                result = result.round();
+                            } else if (op === 'ceil') {
+                                result = Decimal.ceil(result);
+                            } else if (op === 'floor') {
+                                result = Decimal.floor(result);
+                            } else if (op === 'min') {
+                                for (let i = 1; i < operands.length; i++) {
+                                    const val = new Decimal(resolveOperand(operands[i], rowResults, calculator.rows));
+                                    result = Decimal.min(result, val);
+                                }
+                            } else if (op === 'max') {
+                                for (let i = 1; i < operands.length; i++) {
+                                    const val = new Decimal(resolveOperand(operands[i], rowResults, calculator.rows));
+                                    result = Decimal.max(result, val);
+                                }
+                            } else if (op === 'avg') {
+                                for (let i = 1; i < operands.length; i++) {
+                                    const val = new Decimal(resolveOperand(operands[i], rowResults, calculator.rows));
+                                    result = result.plus(val);
+                                }
+                                result = result.dividedBy(operands.length);
+                            } else {
+                                // Binary operators: applied sequentially
+                                for (let i = 1; i < operands.length; i++) {
+                                    const val = new Decimal(resolveOperand(operands[i], rowResults, calculator.rows));
+                                    switch (op) {
+                                        case '+': result = result.plus(val); break;
+                                        case '-':
+                                        case '−': result = result.minus(val); break;
+                                        case '×':
+                                        case '*': result = result.times(val); break;
+                                        case '÷':
+                                        case '/': result = val.isZero() ? result : result.dividedBy(val); break;
+                                        case '%': result = result.times(val).dividedBy(100); break;
+                                        case '^': result = result.pow(val); break;
+                                    }
                                 }
                             }
                             rowResults[row.key] = result.toDecimalPlaces(2).toString();
@@ -477,12 +678,64 @@ export const useAppStore = create<AppStore>()(
                     }
                 }
 
-                // Find total row or use last calculated row
+                // Process cost blocks (if any)
+                const blockResults: { blockKey: string; label: string; value: string; isActive: boolean }[] = [];
+                const costBlocks = (calculator.costBlocks || []).filter((b) => b.isActive);
+                costBlocks.sort((a, b) => a.orderIndex - b.orderIndex);
+
+                for (const block of costBlocks) {
+                    // Execute each formula in the block
+                    const sortedFormulas = [...block.formulas].sort((a, b) => a.orderIndex - b.orderIndex);
+                    for (const formula of sortedFormulas) {
+                        try {
+                            if (formula.operands.length === 0) {
+                                rowResults[formula.outputKey] = '0';
+                                continue;
+                            }
+
+                            let result = new Decimal(resolveOperand(formula.operands[0], rowResults, calculator.rows));
+
+                            if (formula.operationType === 'sum') {
+                                // Sum: accumulate all operands
+                                for (let i = 1; i < formula.operands.length; i++) {
+                                    const val = new Decimal(resolveOperand(formula.operands[i], rowResults, calculator.rows));
+                                    result = result.plus(val);
+                                }
+                            } else {
+                                for (let i = 1; i < formula.operands.length; i++) {
+                                    const val = new Decimal(resolveOperand(formula.operands[i], rowResults, calculator.rows));
+                                    switch (formula.operationType) {
+                                        case '+': result = result.plus(val); break;
+                                        case '-': result = result.minus(val); break;
+                                        case '×': result = result.times(val); break;
+                                        case '÷': result = val.isZero() ? result : result.dividedBy(val); break;
+                                    }
+                                }
+                            }
+                            rowResults[formula.outputKey] = result.toDecimalPlaces(2).toString();
+                        } catch {
+                            rowResults[formula.outputKey] = '0';
+                        }
+                    }
+
+                    // Record block output
+                    blockResults.push({
+                        blockKey: block.key,
+                        label: block.label,
+                        value: rowResults[block.outputKey] || '0',
+                        isActive: block.isActive,
+                    });
+                }
+
+                // Find total row or use last calculated row or last block output
                 const totalRow = calculator.rows.find((r) => r.isTotal);
                 let total = new Decimal(totalRow ? rowResults[totalRow.key] || '0' : '0');
 
-                // If no total row, sum all calculated rows
-                if (!totalRow) {
+                if (!totalRow && costBlocks.length > 0) {
+                    // Use last block's output as total
+                    const lastBlock = costBlocks[costBlocks.length - 1];
+                    total = new Decimal(rowResults[lastBlock.outputKey] || '0');
+                } else if (!totalRow) {
                     const lastCalc = [...calculator.rows].reverse().find((r) => r.type === 'calculated' && r.key);
                     if (lastCalc) total = new Decimal(rowResults[lastCalc.key] || '0');
                 }
@@ -499,6 +752,7 @@ export const useAppStore = create<AppStore>()(
                 return {
                     rowResults,
                     total: total.toDecimalPlaces(2).toString(),
+                    blockResults: blockResults.length > 0 ? blockResults : undefined,
                 };
             },
         }),
