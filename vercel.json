@@ -1,0 +1,12 @@
+{
+    "buildCommand": "cd packages/web && npm run build",
+    "outputDirectory": "packages/web/dist",
+    "installCommand": "npm install",
+    "framework": null,
+    "rewrites": [
+        {
+            "source": "/(.*)",
+            "destination": "/index.html"
+        }
+    ]
+}
