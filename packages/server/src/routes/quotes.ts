@@ -61,17 +61,17 @@ export async function quoteRoutes(server: FastifyInstance) {
         const quote = await prisma.quote.create({
             data: {
                 productVersionId: versionId,
-                inputSnapshotJson: {
+                inputSnapshotJson: JSON.parse(JSON.stringify({
                     inputs,
                     temporaryItems: temporaryItems ?? [],
                     schemaSnapshot: schema,
-                },
-                outputSnapshotJson: {
+                })),
+                outputSnapshotJson: JSON.parse(JSON.stringify({
                     outputs: result.outputs,
                     steps: result.steps,
                     total: result.total,
                     temporaryItemsTotal: finalTotal.minus(result.total).toString(),
-                },
+                })),
                 inputHash: result.inputHash ?? '',
                 totalAmountDecimal: finalTotal.toNumber(),
             },
