@@ -270,6 +270,55 @@ export function CalculatorBuilder({ calculatorId }: { calculatorId: string }) {
                                     ))}
                                 </div>
                             )}
+
+                            {/* Reference list for input rows */}
+                            {row.type === 'input' && (
+                                <div className="border-t border-surface-border px-4 py-3 bg-white/30 space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-sm text-black">
+                                            Reference List
+                                            {(row.referenceItems || []).length > 0 && (
+                                                <span className="text-black/40 ml-1">({(row.referenceItems || []).length})</span>
+                                            )}
+                                        </span>
+                                        <button
+                                            onClick={() => store.addReferenceItem(calculatorId, row.id)}
+                                            className="text-sm text-black/50 hover:text-black flex items-center gap-1 transition-colors"
+                                        >
+                                            <Plus className="w-3 h-3" /> Add Item
+                                        </button>
+                                    </div>
+
+                                    {(row.referenceItems || []).length > 0 && (
+                                        <div className="grid grid-cols-[1fr_100px_24px] gap-2 text-[10px] text-black uppercase tracking-wider px-1">
+                                            <span>Name</span>
+                                            <span>Value</span>
+                                            <span></span>
+                                        </div>
+                                    )}
+
+                                    {(row.referenceItems || []).map((item) => (
+                                        <div key={item.id} className="grid grid-cols-[1fr_100px_24px] gap-2 items-center">
+                                            <input type="text" value={item.name}
+                                                onChange={(e) => store.updateReferenceItem(calculatorId, row.id, item.id, { name: e.target.value })}
+                                                placeholder="e.g. Small Board" className="rounded bg-white border border-black/10 px-2 py-1 text-sm text-black placeholder:text-black/30 outline-none focus:ring-1 focus:ring-black/10" />
+                                            <input type="text" value={item.value}
+                                                onChange={(e) => store.updateReferenceItem(calculatorId, row.id, item.id, { value: e.target.value })}
+                                                placeholder="150" className="rounded bg-white border border-black/10 px-2 py-1 text-sm text-black font-mono placeholder:text-black/30 outline-none focus:ring-1 focus:ring-black/10" />
+                                            <button onClick={() => store.removeReferenceItem(calculatorId, row.id, item.id)}
+                                                className="p-0.5 rounded text-black hover:text-red-500 transition-colors" title="Remove item">
+                                                <Trash2 className="w-3 h-3" />
+                                            </button>
+                                        </div>
+                                    ))}
+
+                                    {(row.referenceItems || []).length === 0 && (
+                                        <p className="text-xs text-black/30 italic">
+                                            No reference items yet. Add items so sales reps can quick-fill this input.
+                                        </p>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     );
                 })}

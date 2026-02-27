@@ -22,6 +22,12 @@ export interface DropdownOption {
     rate: string; // Decimal string
 }
 
+export interface ReferenceItem {
+    id: string;
+    name: string;
+    value: string; // Decimal string — auto-fills the input when clicked
+}
+
 export type FormulaToken = {
     type: 'field' | 'operator' | 'number' | 'bracket';
     value: string;
@@ -41,6 +47,7 @@ export interface CalculatorRow {
     type: RowType;
     fixedValue?: string;
     dropdownOptions?: DropdownOption[];
+    referenceItems?: ReferenceItem[];
     formula?: RowFormula;
     isTotal?: boolean;
     isRequired?: boolean;

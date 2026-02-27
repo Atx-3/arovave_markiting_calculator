@@ -11,13 +11,14 @@ import type {
     Calculator,
     CalculatorRow,
     DropdownOption,
+    ReferenceItem,
     RowType,
     Operation,
     TempItem,
     CostBlock,
     CostBlockType,
     BlockFormula,
-    RowFormula, // Added RowFormula to imports
+    RowFormula,
 } from '../types/calculator';
 
 // ─── Helpers ─────────────────────────────────────────────────────────
@@ -78,6 +79,11 @@ interface AppStore {
     addBlockFormula: (calculatorId: string, blockId: string, formula: Omit<BlockFormula, 'id'>) => void;
     updateBlockFormula: (calculatorId: string, blockId: string, formulaId: string, updates: Partial<BlockFormula>) => void;
     removeBlockFormula: (calculatorId: string, blockId: string, formulaId: string) => void;
+
+    // ── Reference Items (per input row) ──
+    addReferenceItem: (calculatorId: string, rowId: string) => void;
+    removeReferenceItem: (calculatorId: string, rowId: string, itemId: string) => void;
+    updateReferenceItem: (calculatorId: string, rowId: string, itemId: string, updates: Partial<ReferenceItem>) => void;
 
     // ── Temp Items (per-calculator reference list) ──
     addTempItem: (calculatorId: string, name: string, rate: string) => void;
@@ -203,6 +209,7 @@ export const useAppStore = create<AppStore>()(
                                         label: '',
                                         key: '',
                                         type: 'input' as RowType,
+                                        referenceItems: [],
                                     },
                                 ],
                             }
@@ -593,6 +600,74 @@ export const useAppStore = create<AppStore>()(
                                             : '',
                                     };
                                 }),
+                            }
+                            : calc
+                    ),
+                })),
+
+            // ══════════════════════════════════════════════════════════════════
+            // REFERENCE ITEMS (per input row)
+            // ══════════════════════════════════════════════════════════════════
+
+            addReferenceItem: (calculatorId, rowId) =>
+                set((s) => ({
+                    calculators: s.calculators.map((calc) =>
+                        calc.id === calculatorId
+                            ? {
+                                ...calc,
+                                rows: calc.rows.map((r) =>
+                                    r.id === rowId
+                                        ? {
+                                            ...r,
+                                            referenceItems: [
+                                                ...(r.referenceItems || []),
+                                                { id: uid(), name: '', value: '' },
+                                            ],
+                                        }
+                                        : r
+                                ),
+                            }
+                            : calc
+                    ),
+                })),
+
+            removeReferenceItem: (calculatorId, rowId, itemId) =>
+                set((s) => ({
+                    calculators: s.calculators.map((calc) =>
+                        calc.id === calculatorId
+                            ? {
+                                ...calc,
+                                rows: calc.rows.map((r) =>
+                                    r.id === rowId
+                                        ? {
+                                            ...r,
+                                            referenceItems: (r.referenceItems || []).filter(
+                                                (item) => item.id !== itemId
+                                            ),
+                                        }
+                                        : r
+                                ),
+                            }
+                            : calc
+                    ),
+                })),
+
+            updateReferenceItem: (calculatorId, rowId, itemId, updates) =>
+                set((s) => ({
+                    calculators: s.calculators.map((calc) =>
+                        calc.id === calculatorId
+                            ? {
+                                ...calc,
+                                rows: calc.rows.map((r) =>
+                                    r.id === rowId
+                                        ? {
+                                            ...r,
+                                            referenceItems: (r.referenceItems || []).map((item) =>
+                                                item.id === itemId ? { ...item, ...updates } : item
+                                            ),
+                                        }
+                                        : r
+                                ),
                             }
                             : calc
                     ),

@@ -7,6 +7,7 @@ import {
     Plus,
     Trash2,
     ListChecks,
+    List,
     X,
 } from 'lucide-react';
 import { useAppStore } from '../../stores/templateStore';
@@ -26,6 +27,7 @@ export function SalesCalculator() {
     const [selectedDropdowns, setSelectedDropdowns] = useState<Record<string, string>>({});
     const [userTempItems, setUserTempItems] = useState<UserTempItem[]>([]);
     const [showTempList, setShowTempList] = useState(false);
+    const [openRefList, setOpenRefList] = useState<string | null>(null);
 
     // Navigation
     const children = getCategoryChildren(currentCategoryId);
@@ -212,15 +214,52 @@ export function SalesCalculator() {
 
                                                 <div className="w-48 shrink-0">
                                                     {row.type === 'input' && (
-                                                        <input
-                                                            type="text"
-                                                            value={inputs[row.key] || ''}
-                                                            onChange={(e) =>
-                                                                setInputs((prev) => ({ ...prev, [row.key]: e.target.value }))
-                                                            }
-                                                            placeholder="0"
-                                                            className="w-full rounded-md bg-white border border-black/10 px-3 py-1.5 text-base text-black font-mono placeholder:text-black/30 outline-none focus:ring-1 focus:ring-black/10 text-right"
-                                                        />
+                                                        <div className="relative flex items-center gap-1">
+                                                            <input
+                                                                type="text"
+                                                                value={inputs[row.key] || ''}
+                                                                onChange={(e) =>
+                                                                    setInputs((prev) => ({ ...prev, [row.key]: e.target.value }))
+                                                                }
+                                                                placeholder="0"
+                                                                className="w-full rounded-md bg-white border border-black/10 px-3 py-1.5 text-base text-black font-mono placeholder:text-black/30 outline-none focus:ring-1 focus:ring-black/10 text-right"
+                                                            />
+                                                            {(row.referenceItems || []).length > 0 && (
+                                                                <>
+                                                                    <button
+                                                                        onClick={() => setOpenRefList(openRefList === row.id ? null : row.id)}
+                                                                        className={`p-1.5 rounded-md transition-all duration-200 shrink-0 ${openRefList === row.id
+                                                                                ? 'bg-black text-white'
+                                                                                : 'text-black/30 hover:text-black hover:bg-black/5'
+                                                                            }`}
+                                                                        title="Quick-fill from reference list"
+                                                                    >
+                                                                        <List className="w-4 h-4" />
+                                                                    </button>
+                                                                    {openRefList === row.id && (
+                                                                        <div className="absolute top-full right-0 mt-1 z-50 bg-white border border-black/10 rounded-xl shadow-xl shadow-black/10 min-w-[200px] max-h-48 overflow-y-auto animate-fade-in">
+                                                                            <div className="px-3 py-2 border-b border-black/5 text-[10px] uppercase tracking-widest text-black/40 font-bold">
+                                                                                Reference List
+                                                                            </div>
+                                                                            {(row.referenceItems || []).map((item) => (
+                                                                                <button
+                                                                                    key={item.id}
+                                                                                    onClick={() => {
+                                                                                        setInputs((prev) => ({ ...prev, [row.key]: item.value }));
+                                                                                        setOpenRefList(null);
+                                                                                    }}
+                                                                                    className={`w-full text-left px-3 py-2 flex items-center justify-between gap-3 hover:bg-black/[0.03] transition-colors ${inputs[row.key] === item.value ? 'bg-black/[0.04]' : ''
+                                                                                        }`}
+                                                                                >
+                                                                                    <span className="text-sm text-black font-medium truncate">{item.name || 'Unnamed'}</span>
+                                                                                    <span className="text-sm text-black/50 font-mono shrink-0">{item.value}</span>
+                                                                                </button>
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
+                                                                </>
+                                                            )}
+                                                        </div>
                                                     )}
 
                                                     {row.type === 'dropdown' && (
