@@ -1,5 +1,4 @@
 {
-    "extends": "../../tsconfig.base.json",
     "compilerOptions": {
         "target": "ES2020",
         "lib": [
@@ -12,6 +11,12 @@
         "moduleResolution": "bundler",
         "allowImportingTsExtensions": true,
         "noEmit": true,
+        "strict": true,
+        "esModuleInterop": true,
+        "skipLibCheck": true,
+        "forceConsistentCasingInFileNames": true,
+        "resolveJsonModule": true,
+        "isolatedModules": true,
         "baseUrl": ".",
         "paths": {
             "@/*": [
