@@ -944,6 +944,36 @@ export const useAppStore = create<AppStore>()(
                 calculators: state.calculators,
                 selectedCalculatorId: state.selectedCalculatorId,
             }),
+            // Migration: sync existing input rows → temp items for old data
+            onRehydrateStorage: () => (state) => {
+                if (!state) return;
+                // Use setTimeout to run after Zustand finishes hydration
+                setTimeout(() => {
+                    const currentState = useAppStore.getState();
+                    let needsUpdate = false;
+                    const updatedCalcs = currentState.calculators.map((calc) => {
+                        const tempItems = [...(calc.tempItems || [])];
+                        const linkedRowIds = new Set(
+                            tempItems.filter((t) => t.autoFromRowId).map((t) => t.autoFromRowId)
+                        );
+                        let calcChanged = false;
+                        for (const row of calc.rows) {
+                            if (row.type === 'input' && !linkedRowIds.has(row.id)) {
+                                tempItems.push({ id: uid(), name: row.label || '', rate: '', autoFromRowId: row.id });
+                                calcChanged = true;
+                            }
+                        }
+                        if (calcChanged) {
+                            needsUpdate = true;
+                            return { ...calc, tempItems };
+                        }
+                        return calc;
+                    });
+                    if (needsUpdate) {
+                        useAppStore.setState({ calculators: updatedCalcs });
+                    }
+                }, 0);
+            },
         }
     )
 );

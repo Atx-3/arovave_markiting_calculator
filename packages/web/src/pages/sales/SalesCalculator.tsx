@@ -229,8 +229,8 @@ export function SalesCalculator() {
                                                                     <button
                                                                         onClick={() => setOpenRefList(openRefList === row.id ? null : row.id)}
                                                                         className={`p-1.5 rounded-md transition-all duration-200 shrink-0 ${openRefList === row.id
-                                                                                ? 'bg-black text-white'
-                                                                                : 'text-black/30 hover:text-black hover:bg-black/5'
+                                                                            ? 'bg-black text-white'
+                                                                            : 'text-black/30 hover:text-black hover:bg-black/5'
                                                                             }`}
                                                                         title="Quick-fill from reference list"
                                                                     >
@@ -411,19 +411,48 @@ export function SalesCalculator() {
                                 </button>
                             </div>
                             <p className="text-[11px] text-black">
-                                Click to add to your calculation:
+                                Click to fill input fields:
                             </p>
                             <div className="space-y-1 max-h-80 overflow-auto">
-                                {adminTempItems.map((item) => (
-                                    <button
-                                        key={item.id}
-                                        onClick={() => addFromReferenceList(item.name, item.rate)}
-                                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm hover:bg-white transition-colors group"
-                                    >
-                                        <span className="text-black group-hover:text-black">{item.name}</span>
-                                        <span className="text-black font-mono">₹{item.rate}</span>
-                                    </button>
-                                ))}
+                                {adminTempItems.map((item) => {
+                                    // For auto-linked items, find the row key to fill the input
+                                    const linkedRow = item.autoFromRowId
+                                        ? currentCalc?.rows.find((r) => r.id === item.autoFromRowId)
+                                        : null;
+                                    const isFilled = linkedRow && inputs[linkedRow.key] === item.rate && item.rate !== '';
+
+                                    return (
+                                        <button
+                                            key={item.id}
+                                            onClick={() => {
+                                                if (linkedRow && item.rate) {
+                                                    // Fill the corresponding input field
+                                                    setInputs((prev) => ({ ...prev, [linkedRow.key]: item.rate }));
+                                                } else if (!linkedRow) {
+                                                    // Non-linked item — add as additional item
+                                                    addFromReferenceList(item.name, item.rate);
+                                                }
+                                            }}
+                                            disabled={!item.rate}
+                                            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-colors group ${isFilled
+                                                ? 'bg-black/[0.04] ring-1 ring-black/10'
+                                                : item.rate
+                                                    ? 'hover:bg-white'
+                                                    : 'opacity-40 cursor-not-allowed'
+                                                }`}
+                                        >
+                                            <span className="text-black group-hover:text-black flex items-center gap-1.5">
+                                                {item.name || <span className="text-black/30 italic">Unnamed</span>}
+                                                {linkedRow && (
+                                                    <span className="text-[9px] text-black/30">→ fill</span>
+                                                )}
+                                            </span>
+                                            <span className="text-black font-mono">
+                                                {item.rate ? `₹${item.rate}` : '—'}
+                                            </span>
+                                        </button>
+                                    );
+                                })}
                             </div>
                         </div>
                     </div>
