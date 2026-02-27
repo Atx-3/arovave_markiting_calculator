@@ -82,6 +82,7 @@ export function TempListManager({ calculatorId }: { calculatorId: string }) {
                                         type="text"
                                         value={editName}
                                         onChange={(e) => setEditName(e.target.value)}
+                                        placeholder="Item name"
                                         className="rounded bg-white border border-black/10 px-2 py-1 text-sm text-black outline-none focus:ring-1 focus:ring-black/10"
                                         autoFocus
                                     />
@@ -89,6 +90,7 @@ export function TempListManager({ calculatorId }: { calculatorId: string }) {
                                         type="text"
                                         value={editRate}
                                         onChange={(e) => setEditRate(e.target.value)}
+                                        placeholder="Rate (₹)"
                                         className="rounded bg-white border border-black/10 px-2 py-1 text-sm text-black font-mono outline-none focus:ring-1 focus:ring-black/10"
                                     />
                                     <div className="flex gap-1">

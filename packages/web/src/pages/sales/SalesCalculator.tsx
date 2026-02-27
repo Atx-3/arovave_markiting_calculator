@@ -9,9 +9,11 @@ import {
     ListChecks,
     List,
     X,
+    FolderTree,
+    ChevronLeft,
 } from 'lucide-react';
 import { useAppStore } from '../../stores/templateStore';
-import type { UserTempItem } from '../../types/calculator';
+import type { UserTempItem, RefTreeNode } from '../../types/calculator';
 
 export function SalesCalculator() {
     const {
@@ -28,6 +30,8 @@ export function SalesCalculator() {
     const [userTempItems, setUserTempItems] = useState<UserTempItem[]>([]);
     const [showTempList, setShowTempList] = useState(false);
     const [openRefList, setOpenRefList] = useState<string | null>(null);
+    const [focusedRowId, setFocusedRowId] = useState<string | null>(null);
+    const [refTreePath, setRefTreePath] = useState<string[]>([]); // array of selected node IDs for tree drill-down
 
     // Navigation
     const children = getCategoryChildren(currentCategoryId);
@@ -214,52 +218,23 @@ export function SalesCalculator() {
 
                                                 <div className="w-48 shrink-0">
                                                     {row.type === 'input' && (
-                                                        <div className="relative flex items-center gap-1">
-                                                            <input
-                                                                type="text"
-                                                                value={inputs[row.key] || ''}
-                                                                onChange={(e) =>
-                                                                    setInputs((prev) => ({ ...prev, [row.key]: e.target.value }))
-                                                                }
-                                                                placeholder="0"
-                                                                className="w-full rounded-md bg-white border border-black/10 px-3 py-1.5 text-base text-black font-mono placeholder:text-black/30 outline-none focus:ring-1 focus:ring-black/10 text-right"
-                                                            />
-                                                            {(row.referenceItems || []).length > 0 && (
-                                                                <>
-                                                                    <button
-                                                                        onClick={() => setOpenRefList(openRefList === row.id ? null : row.id)}
-                                                                        className={`p-1.5 rounded-md transition-all duration-200 shrink-0 ${openRefList === row.id
-                                                                            ? 'bg-black text-white'
-                                                                            : 'text-black/30 hover:text-black hover:bg-black/5'
-                                                                            }`}
-                                                                        title="Quick-fill from reference list"
-                                                                    >
-                                                                        <List className="w-4 h-4" />
-                                                                    </button>
-                                                                    {openRefList === row.id && (
-                                                                        <div className="absolute top-full right-0 mt-1 z-50 bg-white border border-black/10 rounded-xl shadow-xl shadow-black/10 min-w-[200px] max-h-48 overflow-y-auto animate-fade-in">
-                                                                            <div className="px-3 py-2 border-b border-black/5 text-[10px] uppercase tracking-widest text-black/40 font-bold">
-                                                                                Reference List
-                                                                            </div>
-                                                                            {(row.referenceItems || []).map((item) => (
-                                                                                <button
-                                                                                    key={item.id}
-                                                                                    onClick={() => {
-                                                                                        setInputs((prev) => ({ ...prev, [row.key]: item.value }));
-                                                                                        setOpenRefList(null);
-                                                                                    }}
-                                                                                    className={`w-full text-left px-3 py-2 flex items-center justify-between gap-3 hover:bg-black/[0.03] transition-colors ${inputs[row.key] === item.value ? 'bg-black/[0.04]' : ''
-                                                                                        }`}
-                                                                                >
-                                                                                    <span className="text-sm text-black font-medium truncate">{item.name || 'Unnamed'}</span>
-                                                                                    <span className="text-sm text-black/50 font-mono shrink-0">{item.value}</span>
-                                                                                </button>
-                                                                            ))}
-                                                                        </div>
-                                                                    )}
-                                                                </>
-                                                            )}
-                                                        </div>
+                                                        <input
+                                                            type="text"
+                                                            value={inputs[row.key] || ''}
+                                                            onChange={(e) =>
+                                                                setInputs((prev) => ({ ...prev, [row.key]: e.target.value }))
+                                                            }
+                                                            placeholder="0"
+                                                            className={`w-full rounded-md bg-white border px-3 py-1.5 text-base text-black font-mono placeholder:text-black/30 outline-none focus:ring-1 text-right transition-colors ${focusedRowId === row.id
+                                                                ? 'border-black/30 ring-black/20'
+                                                                : 'border-black/10 focus:ring-black/10'
+                                                                }`}
+                                                            onFocus={() => {
+                                                                setFocusedRowId(row.id);
+                                                                setRefTreePath([]);
+                                                                setShowTempList(true);
+                                                            }}
+                                                        />
                                                     )}
 
                                                     {row.type === 'dropdown' && (
@@ -372,7 +347,10 @@ export function SalesCalculator() {
                                         </button>
                                         {adminTempItems.length > 0 && (
                                             <button
-                                                onClick={() => setShowTempList(!showTempList)}
+                                                onClick={() => {
+                                                    setFocusedRowId(null);
+                                                    setShowTempList(!showTempList);
+                                                }}
                                                 className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-xl border transition-colors ${showTempList
                                                     ? 'text-black border-accent-cyan/20 bg-accent-cyan/5'
                                                     : 'text-black border-surface-border hover:text-black'
@@ -396,67 +374,241 @@ export function SalesCalculator() {
                     )}
                 </div>
 
-                {/* Temp items reference sidebar — from this calculator's admin temp list */}
-                {showTempList && currentCalc && adminTempItems.length > 0 && (
-                    <div className="w-64 shrink-0">
-                        <div className="glass rounded-2xl p-4 space-y-3 sticky top-20">
-                            <div className="flex items-center justify-between">
-                                <h3 className="text-sm font-semibold text-black">Reference Items</h3>
-                                <button
-                                    onClick={() => setShowTempList(false)}
-                                    className="p-1 rounded text-black hover:text-black transition-colors"
-                                    title="Close"
-                                >
-                                    <X className="w-3 h-3" />
-                                </button>
-                            </div>
-                            <p className="text-[11px] text-black">
-                                Click to fill input fields:
-                            </p>
-                            <div className="space-y-1 max-h-80 overflow-auto">
-                                {adminTempItems.map((item) => {
-                                    // For auto-linked items, find the row key to fill the input
-                                    const linkedRow = item.autoFromRowId
-                                        ? currentCalc?.rows.find((r) => r.id === item.autoFromRowId)
-                                        : null;
-                                    const isFilled = linkedRow && inputs[linkedRow.key] === item.rate && item.rate !== '';
+                {/* Reference sidebar — shows focused input's references or all items */}
+                {showTempList && currentCalc && (() => {
+                    // Find the focused row and its specific references
+                    const focusedRow = focusedRowId ? currentCalc.rows.find((r) => r.id === focusedRowId) : null;
+                    const focusedLinkedTemp = focusedRowId ? adminTempItems.find((t) => t.autoFromRowId === focusedRowId && t.rate) : null;
+                    const focusedRefItems = focusedRow?.referenceItems || [];
+                    const hasFocusedRefs = !!focusedLinkedTemp || focusedRefItems.length > 0;
+                    const focusedRefTree = focusedRow?.refTree;
 
-                                    return (
-                                        <button
-                                            key={item.id}
-                                            onClick={() => {
-                                                if (linkedRow && item.rate) {
-                                                    // Fill the corresponding input field
-                                                    setInputs((prev) => ({ ...prev, [linkedRow.key]: item.rate }));
-                                                } else if (!linkedRow) {
-                                                    // Non-linked item — add as additional item
-                                                    addFromReferenceList(item.name, item.rate);
-                                                }
-                                            }}
-                                            disabled={!item.rate}
-                                            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-colors group ${isFilled
-                                                ? 'bg-black/[0.04] ring-1 ring-black/10'
-                                                : item.rate
-                                                    ? 'hover:bg-white'
-                                                    : 'opacity-40 cursor-not-allowed'
-                                                }`}
-                                        >
-                                            <span className="text-black group-hover:text-black flex items-center gap-1.5">
-                                                {item.name || <span className="text-black/30 italic">Unnamed</span>}
-                                                {linkedRow && (
-                                                    <span className="text-[9px] text-black/30">→ fill</span>
-                                                )}
-                                            </span>
-                                            <span className="text-black font-mono">
-                                                {item.rate ? `₹${item.rate}` : '—'}
-                                            </span>
-                                        </button>
-                                    );
-                                })}
+                    // Determine if there's anything to show
+                    const hasAnything = adminTempItems.length > 0 || focusedRefTree;
+                    if (!hasAnything) return null;
+
+                    // Tree navigation: resolve current level nodes
+                    let treeCurrentNodes: RefTreeNode[] = [];
+                    let treeCurrentLevel = '';
+                    let treeBreadcrumb: { id: string; name: string }[] = [];
+                    if (focusedRefTree) {
+                        let nodes = focusedRefTree.nodes;
+                        for (let i = 0; i < refTreePath.length; i++) {
+                            const found = nodes.find((n) => n.id === refTreePath[i]);
+                            if (found) {
+                                treeBreadcrumb.push({ id: found.id, name: found.name || '...' });
+                                nodes = found.children || [];
+                            } else {
+                                break;
+                            }
+                        }
+                        treeCurrentNodes = nodes;
+                        treeCurrentLevel = focusedRefTree.levels[refTreePath.length] || 'Rate';
+                    }
+                    const isTreeLeaf = focusedRefTree && refTreePath.length >= focusedRefTree.levels.length;
+
+                    return (
+                        <div className="w-64 shrink-0">
+                            <div className="glass rounded-2xl p-4 space-y-3 sticky top-20">
+                                <div className="flex items-center justify-between">
+                                    <h3 className="text-sm font-semibold text-black">
+                                        {focusedRow ? `${focusedRow.label} — Reference` : 'Reference Items'}
+                                    </h3>
+                                    <button
+                                        onClick={() => { setShowTempList(false); setFocusedRowId(null); setRefTreePath([]); }}
+                                        className="p-1 rounded text-black hover:text-black transition-colors"
+                                        title="Close"
+                                    >
+                                        <X className="w-3 h-3" />
+                                    </button>
+                                </div>
+
+                                {/* Tree navigation — when focused row has a refTree */}
+                                {focusedRow && focusedRefTree && (
+                                    <div className="space-y-2">
+                                        {/* Breadcrumb */}
+                                        {treeBreadcrumb.length > 0 && (
+                                            <div className="flex items-center gap-1 flex-wrap">
+                                                <button
+                                                    onClick={() => setRefTreePath([])}
+                                                    className="text-[10px] text-black/40 hover:text-black transition-colors"
+                                                >
+                                                    All
+                                                </button>
+                                                {treeBreadcrumb.map((bc, i) => (
+                                                    <span key={bc.id} className="flex items-center gap-1">
+                                                        <ChevronRight className="w-2.5 h-2.5 text-black/20" />
+                                                        <button
+                                                            onClick={() => setRefTreePath(refTreePath.slice(0, i + 1))}
+                                                            className={`text-[10px] transition-colors ${i === treeBreadcrumb.length - 1
+                                                                ? 'text-black font-semibold'
+                                                                : 'text-black/40 hover:text-black'
+                                                                }`}
+                                                        >
+                                                            {bc.name}
+                                                        </button>
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        )}
+
+                                        {/* Back button + level title */}
+                                        <div className="flex items-center gap-2">
+                                            {refTreePath.length > 0 && (
+                                                <button
+                                                    onClick={() => setRefTreePath(refTreePath.slice(0, -1))}
+                                                    className="p-1 rounded text-black/30 hover:text-black hover:bg-black/5 transition-colors"
+                                                    title="Go back"
+                                                >
+                                                    <ChevronLeft className="w-3.5 h-3.5" />
+                                                </button>
+                                            )}
+                                            <div className="flex items-center gap-1.5">
+                                                <FolderTree className="w-3.5 h-3.5 text-black/30" />
+                                                <span className="text-xs text-black/50 font-medium">
+                                                    {isTreeLeaf ? 'Select rate' : `Choose ${treeCurrentLevel}`}
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        {/* Options at current level */}
+                                        <div className="space-y-1">
+                                            {treeCurrentNodes.map((node) => {
+                                                const isLeaf = !node.children || node.children.length === 0;
+                                                const hasRate = !!node.rate;
+
+                                                return (
+                                                    <button
+                                                        key={node.id}
+                                                        onClick={() => {
+                                                            if (isLeaf && hasRate) {
+                                                                // Leaf: fill input
+                                                                setInputs((prev) => ({ ...prev, [focusedRow.key]: node.rate! }));
+                                                            } else if (!isLeaf) {
+                                                                // Drill deeper
+                                                                setRefTreePath([...refTreePath, node.id]);
+                                                            }
+                                                        }}
+                                                        disabled={isLeaf && !hasRate}
+                                                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-colors group ${isLeaf && hasRate && inputs[focusedRow.key] === node.rate
+                                                            ? 'bg-black/[0.06] ring-1 ring-black/10'
+                                                            : isLeaf && !hasRate
+                                                                ? 'opacity-40 cursor-not-allowed'
+                                                                : 'hover:bg-white'
+                                                            }`}
+                                                    >
+                                                        <span className="text-black font-medium flex items-center gap-1.5">
+                                                            {node.name || <span className="text-black/30 italic">Unnamed</span>}
+                                                        </span>
+                                                        {isLeaf ? (
+                                                            <span className="text-black font-mono font-semibold">
+                                                                {hasRate ? `₹${node.rate}` : '—'}
+                                                            </span>
+                                                        ) : (
+                                                            <ChevronRight className="w-3.5 h-3.5 text-black/30 group-hover:text-black transition-colors" />
+                                                        )}
+                                                    </button>
+                                                );
+                                            })}
+                                            {treeCurrentNodes.length === 0 && (
+                                                <p className="text-xs text-black/30 text-center py-3 italic">
+                                                    No items at this level
+                                                </p>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Flat reference items (when no tree, or tree + flat refs) */}
+                                {focusedRow && !focusedRefTree && hasFocusedRefs && (
+                                    <>
+                                        <p className="text-[11px] text-black">
+                                            Click to fill {focusedRow.label}:
+                                        </p>
+                                        <div className="space-y-1">
+                                            {focusedLinkedTemp && (
+                                                <button
+                                                    onClick={() => {
+                                                        setInputs((prev) => ({ ...prev, [focusedRow.key]: focusedLinkedTemp.rate }));
+                                                    }}
+                                                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-colors group ${inputs[focusedRow.key] === focusedLinkedTemp.rate
+                                                        ? 'bg-black/[0.06] ring-1 ring-black/10'
+                                                        : 'hover:bg-white'
+                                                        }`}
+                                                >
+                                                    <span className="text-black font-medium">{focusedLinkedTemp.name || focusedRow.label}</span>
+                                                    <span className="text-black font-mono font-semibold">₹{focusedLinkedTemp.rate}</span>
+                                                </button>
+                                            )}
+                                            {focusedRefItems.map((item) => (
+                                                <button
+                                                    key={item.id}
+                                                    onClick={() => {
+                                                        setInputs((prev) => ({ ...prev, [focusedRow.key]: item.value }));
+                                                    }}
+                                                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-colors group ${inputs[focusedRow.key] === item.value
+                                                        ? 'bg-black/[0.06] ring-1 ring-black/10'
+                                                        : 'hover:bg-white'
+                                                        }`}
+                                                >
+                                                    <span className="text-black font-medium">{item.name || 'Unnamed'}</span>
+                                                    <span className="text-black/50 font-mono">{item.value}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </>
+                                )}
+
+                                {/* All items view (no focused row) */}
+                                {!focusedRow && adminTempItems.length > 0 && (
+                                    <>
+                                        <p className="text-[11px] text-black">
+                                            Click to fill input fields:
+                                        </p>
+                                        <div className="space-y-1 max-h-80 overflow-auto">
+                                            {adminTempItems.map((item) => {
+                                                const linkedRow = item.autoFromRowId
+                                                    ? currentCalc?.rows.find((r) => r.id === item.autoFromRowId)
+                                                    : null;
+                                                const isFilled = linkedRow && inputs[linkedRow.key] === item.rate && item.rate !== '';
+
+                                                return (
+                                                    <button
+                                                        key={item.id}
+                                                        onClick={() => {
+                                                            if (linkedRow && item.rate) {
+                                                                setInputs((prev) => ({ ...prev, [linkedRow.key]: item.rate }));
+                                                            } else if (!linkedRow) {
+                                                                addFromReferenceList(item.name, item.rate);
+                                                            }
+                                                        }}
+                                                        disabled={!item.rate}
+                                                        className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm transition-colors group ${isFilled
+                                                            ? 'bg-black/[0.04] ring-1 ring-black/10'
+                                                            : item.rate
+                                                                ? 'hover:bg-white'
+                                                                : 'opacity-40 cursor-not-allowed'
+                                                            }`}
+                                                    >
+                                                        <span className="text-black group-hover:text-black flex items-center gap-1.5">
+                                                            {item.name || <span className="text-black/30 italic">Unnamed</span>}
+                                                            {linkedRow && (
+                                                                <span className="text-[9px] text-black/30">→ fill</span>
+                                                            )}
+                                                        </span>
+                                                        <span className="text-black font-mono">
+                                                            {item.rate ? `₹${item.rate}` : '—'}
+                                                        </span>
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                    </>
+                                )}
                             </div>
                         </div>
-                    </div>
-                )}
+                    );
+                })()}
             </div>
         </div>
     );

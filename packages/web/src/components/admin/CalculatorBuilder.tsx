@@ -12,9 +12,11 @@ import {
     Asterisk,
     Equal,
     Trophy,
+    FolderTree,
 } from 'lucide-react';
 import { useAppStore } from '../../stores/templateStore';
 import type { RowType, Operation } from '../../types/calculator';
+import { RefTreeEditor } from './RefTreeEditor';
 
 // ─── Row types (no "calculated" — formulas are separate) ──────────────
 
@@ -64,6 +66,7 @@ function labelToKey(label: string): string {
 export function CalculatorBuilder({ calculatorId }: { calculatorId: string }) {
     const store = useAppStore();
     const calculator = store.calculators.find((c) => c.id === calculatorId);
+    const [refTreeRowId, setRefTreeRowId] = useState<string | null>(null);
     if (!calculator) return null;
 
     return (
@@ -317,6 +320,36 @@ export function CalculatorBuilder({ calculatorId }: { calculatorId: string }) {
                                             No reference items yet. Add items so sales reps can quick-fill this input.
                                         </p>
                                     )}
+
+                                    {/* Ref Tree toggle */}
+                                    <div className="pt-2 border-t border-black/5">
+                                        <button
+                                            onClick={() => setRefTreeRowId(refTreeRowId === row.id ? null : row.id)}
+                                            className={`flex items-center gap-1.5 text-sm px-2 py-1 rounded-lg transition-colors ${refTreeRowId === row.id || row.refTree
+                                                ? 'text-black bg-black/[0.05] font-medium'
+                                                : 'text-black/40 hover:text-black hover:bg-black/[0.03]'
+                                                }`}
+                                        >
+                                            <FolderTree className="w-3.5 h-3.5" />
+                                            Ref Tree
+                                            {row.refTree && (
+                                                <span className="text-[10px] text-black/30 ml-1">
+                                                    ({row.refTree.levels.join(' → ')})
+                                                </span>
+                                            )}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Ref Tree Editor */}
+                            {row.type === 'input' && refTreeRowId === row.id && (
+                                <div className="border-t border-surface-border px-4 py-3 bg-white/30">
+                                    <RefTreeEditor
+                                        calculatorId={calculatorId}
+                                        rowId={row.id}
+                                        onClose={() => setRefTreeRowId(null)}
+                                    />
                                 </div>
                             )}
                         </div>

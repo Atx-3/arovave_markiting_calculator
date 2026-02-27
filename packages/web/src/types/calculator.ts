@@ -28,6 +28,20 @@ export interface ReferenceItem {
     value: string; // Decimal string — auto-fills the input when clicked
 }
 
+// ─── Reference Tree (Drill-Down Rate Lookup) ──────────────────────────
+
+export interface RefTreeNode {
+    id: string;
+    name: string;           // e.g., "Maharashtra", "Mumbai"
+    children?: RefTreeNode[];
+    rate?: string;           // only leaf nodes have rates
+}
+
+export interface RefTree {
+    levels: string[];        // e.g., ["State", "City"] — admin-defined level names
+    nodes: RefTreeNode[];    // top-level nodes
+}
+
 export type FormulaToken = {
     type: 'field' | 'operator' | 'number' | 'bracket';
     value: string;
@@ -48,6 +62,7 @@ export interface CalculatorRow {
     fixedValue?: string;
     dropdownOptions?: DropdownOption[];
     referenceItems?: ReferenceItem[];
+    refTree?: RefTree;      // tree-based drill-down reference
     formula?: RowFormula;
     isTotal?: boolean;
     isRequired?: boolean;
