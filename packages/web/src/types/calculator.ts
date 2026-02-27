@@ -102,6 +102,7 @@ export interface TempItem {
     id: string;
     name: string;
     rate: string;
+    autoFromRowId?: string; // links to a CalculatorRow.id — auto-synced from input rows
 }
 
 // ─── User Calculation State ───────────────────────────────────────────

@@ -113,8 +113,15 @@ export function TempListManager({ calculatorId }: { calculatorId: string }) {
                                 </>
                             ) : (
                                 <>
-                                    <span className="text-sm text-black">{item.name}</span>
-                                    <span className="text-sm text-black font-mono">₹{item.rate}</span>
+                                    <span className="text-sm text-black flex items-center gap-1.5">
+                                        {item.name || <span className="text-black/30 italic">Unnamed</span>}
+                                        {item.autoFromRowId && (
+                                            <span className="text-[9px] uppercase tracking-wider text-black/30 bg-black/[0.04] px-1.5 py-0.5 rounded font-bold">Auto</span>
+                                        )}
+                                    </span>
+                                    <span className="text-sm text-black font-mono">
+                                        {item.rate ? `₹${item.rate}` : <span className="text-black/30 italic text-xs">Set rate →</span>}
+                                    </span>
                                     <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                         <button
                                             onClick={() => {

@@ -195,7 +195,8 @@ export const useAppStore = create<AppStore>()(
             // CALCULATOR ROWS
             // ══════════════════════════════════════════════════════════════════
 
-            addRow: (calculatorId) =>
+            addRow: (calculatorId) => {
+                const rowId = uid();
                 set((s) => ({
                     calculators: s.calculators.map((calc) =>
                         calc.id === calculatorId
@@ -204,7 +205,7 @@ export const useAppStore = create<AppStore>()(
                                 rows: [
                                     ...calc.rows,
                                     {
-                                        id: uid(),
+                                        id: rowId,
                                         order: calc.rows.length + 1,
                                         label: '',
                                         key: '',
@@ -212,10 +213,16 @@ export const useAppStore = create<AppStore>()(
                                         referenceItems: [],
                                     },
                                 ],
+                                // Auto-create a linked temp item for this input row
+                                tempItems: [
+                                    ...(calc.tempItems || []),
+                                    { id: uid(), name: '', rate: '', autoFromRowId: rowId },
+                                ],
                             }
                             : calc
                     ),
-                })),
+                }));
+            },
 
             addCalculatedRow: (calculatorId, label, key, formula) =>
                 set((s) => ({
@@ -265,6 +272,10 @@ export const useAppStore = create<AppStore>()(
                                 rows: calc.rows
                                     .filter((r) => r.id !== rowId)
                                     .map((r, i) => ({ ...r, order: i + 1 })),
+                                // Also remove the auto-created temp item linked to this row
+                                tempItems: (calc.tempItems || []).filter(
+                                    (t) => t.autoFromRowId !== rowId
+                                ),
                             }
                             : calc
                     ),
@@ -272,16 +283,42 @@ export const useAppStore = create<AppStore>()(
 
             updateRow: (calculatorId, rowId, updates) =>
                 set((s) => ({
-                    calculators: s.calculators.map((calc) =>
-                        calc.id === calculatorId
-                            ? {
-                                ...calc,
-                                rows: calc.rows.map((r) =>
-                                    r.id === rowId ? { ...r, ...updates } : r
-                                ),
+                    calculators: s.calculators.map((calc) => {
+                        if (calc.id !== calculatorId) return calc;
+                        const currentRow = calc.rows.find((r) => r.id === rowId);
+                        let tempItems = calc.tempItems || [];
+
+                        // Sync label → auto temp item name
+                        if (updates.label !== undefined) {
+                            tempItems = tempItems.map((t) =>
+                                t.autoFromRowId === rowId
+                                    ? { ...t, name: updates.label! }
+                                    : t
+                            );
+                        }
+
+                        // Handle type changes: input ↔ other
+                        if (updates.type && currentRow && updates.type !== currentRow.type) {
+                            if (updates.type === 'input') {
+                                // Switched TO input → create linked temp item
+                                tempItems = [
+                                    ...tempItems,
+                                    { id: uid(), name: currentRow.label, rate: '', autoFromRowId: rowId },
+                                ];
+                            } else if (currentRow.type === 'input') {
+                                // Switched FROM input → remove linked temp item
+                                tempItems = tempItems.filter((t) => t.autoFromRowId !== rowId);
                             }
-                            : calc
-                    ),
+                        }
+
+                        return {
+                            ...calc,
+                            rows: calc.rows.map((r) =>
+                                r.id === rowId ? { ...r, ...updates } : r
+                            ),
+                            tempItems,
+                        };
+                    }),
                 })),
 
             moveRow: (calculatorId, rowId, direction) =>
