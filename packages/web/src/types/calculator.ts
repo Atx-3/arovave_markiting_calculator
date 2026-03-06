@@ -1,5 +1,6 @@
 /**
- * Core types for the redesigned Excel-like calculator builder.
+ * Core types for the redesigned calculator system.
+ * Centralized Input Hub + Drag-and-Drop Calculator Builder.
  */
 
 // ─── Category Tree ────────────────────────────────────────────────────
@@ -11,93 +12,90 @@ export interface Category {
     order: number;
 }
 
-// ─── Calculator Rows (Excel-like) ─────────────────────────────────────
+// ─── Centralized Input Definitions ────────────────────────────────────
 
-export type RowType = 'input' | 'dropdown' | 'fixed' | 'calculated';
-export type Operation = '+' | '-' | '×' | '÷';
+export type InputType = 'number' | 'dropdown' | 'fixed';
 
 export interface DropdownOption {
+    id: string;
     label: string;
     value: string;
-    rate: string; // Decimal string
+    rate: string;
 }
 
 export interface ReferenceItem {
     id: string;
     name: string;
-    value: string; // Decimal string — auto-fills the input when clicked
+    value: string;
 }
 
 // ─── Reference Tree (Drill-Down Rate Lookup) ──────────────────────────
 
 export interface RefTreeNode {
     id: string;
-    name: string;           // e.g., "Maharashtra", "Mumbai"
+    name: string;
     children?: RefTreeNode[];
-    rate?: string;           // only leaf nodes have rates
+    rate?: string;
 }
 
 export interface RefTree {
-    levels: string[];        // e.g., ["State", "City"] — admin-defined level names
-    nodes: RefTreeNode[];    // top-level nodes
+    levels: string[];
+    nodes: RefTreeNode[];
 }
 
-export type FormulaToken = {
-    type: 'field' | 'operator' | 'number' | 'bracket';
-    value: string;
-};
-
-export interface RowFormula {
-    operands: string[]; // row keys or literal numbers (legacy, kept for backward compat)
-    operation: Operation; // legacy single-operator
-    tokens?: FormulaToken[]; // full infix expression with brackets & mixed operators
-}
-
-export interface CalculatorRow {
+/**
+ * A global input definition — shared across all calculators.
+ * Rates are managed centrally from one place.
+ */
+export interface InputDefinition {
     id: string;
-    order: number;
-    label: string;
+    name: string;
     key: string;
-    type: RowType;
+    type: InputType;
+    rate: string;
     fixedValue?: string;
     dropdownOptions?: DropdownOption[];
+    refTree?: RefTree;
     referenceItems?: ReferenceItem[];
-    refTree?: RefTree;      // tree-based drill-down reference
-    formula?: RowFormula;
-    isTotal?: boolean;
+    order: number;
+    groupId?: string;
     isRequired?: boolean;
 }
 
-// ─── Cost Blocks (Multi-Stage Pricing) ────────────────────────────────
+// ─── Input Groups ─────────────────────────────────────────────────────
 
-export type CostBlockType =
-    | 'area-based'
-    | 'fixed-rate'
-    | 'dropdown-rate'
-    | 'per-piece'
-    | 'aggregation';
-
-export type BlockOperation = '+' | '-' | '×' | '÷' | 'sum';
-
-export interface BlockFormula {
+export interface InputGroup {
     id: string;
-    outputKey: string;
-    label: string;
-    operationType: BlockOperation;
-    operands: string[];   // row keys, literal numbers, or earlier formula outputKeys
-    orderIndex: number;
+    name: string;
+    order: number;
 }
 
-export interface CostBlock {
+// ─── Calculator Formulas ──────────────────────────────────────────────
+
+export type FormulaTokenType = 'input' | 'operator' | 'number' | 'bracket' | 'formula_ref';
+
+export interface FormulaToken {
+    type: FormulaTokenType;
+    value: string;      // inputDef ID (for 'input'), operator symbol, number string, or formula ID
+    label?: string;     // display label
+}
+
+export interface CalculatorFormula {
     id: string;
-    key: string;
     label: string;
-    orderIndex: number;
-    blockType: CostBlockType;
-    isActive: boolean;
-    isOptional: boolean;
-    outputKey: string;    // must match one of its formulas' outputKey
-    formulas: BlockFormula[];
+    key: string;
+    tokens: FormulaToken[];
+    isTotal?: boolean;
+    order: number;
+}
+
+// ─── Calculator-Specific Local Rates ──────────────────────────────────
+
+export interface LocalRate {
+    id: string;
+    name: string;
+    rate: string;
+    inputId?: string;   // optional link to an InputDefinition
 }
 
 // ─── Calculator ───────────────────────────────────────────────────────
@@ -106,21 +104,12 @@ export interface Calculator {
     id: string;
     name: string;
     categoryId: string;
-    rows: CalculatorRow[];
-    costBlocks: CostBlock[];
-    tempItems: TempItem[]; // each calculator has its own temp list
+    formulas: CalculatorFormula[];
+    localRates: LocalRate[];
+    usedInputIds: string[];
 }
 
-// ─── Temp Items ───────────────────────────────────────────────────────
-
-export interface TempItem {
-    id: string;
-    name: string;
-    rate: string;
-    autoFromRowId?: string; // links to a CalculatorRow.id — auto-synced from input rows
-}
-
-// ─── User Calculation State ───────────────────────────────────────────
+// ─── User Calculation State (Sales Side) ──────────────────────────────
 
 export interface UserTempItem {
     id: string;

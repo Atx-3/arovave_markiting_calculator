@@ -174,6 +174,8 @@ function CategoryNode({
                         }}
                         onBlur={() => { renameCategory(category.id, editName); setEditing(false); }}
                         onClick={(e) => e.stopPropagation()}
+                        placeholder="Category name..."
+                        title="Rename category"
                         className={`flex-1 bg-transparent ${style.size} font-bold text-black outline-none border-b-2 border-brand-500/50`}
                         autoFocus
                     />

@@ -9,7 +9,7 @@ export function Layout() {
     return (
         <div className="min-h-screen flex flex-col bg-white">
             {/* Top Bar — liquid glass */}
-            <header className="border-b border-black/5 bg-white/60 backdrop-blur-xl sticky top-0 z-50" style={{ backdropFilter: 'blur(40px) saturate(1.8)' }}>
+            <header className="border-b border-black/5 bg-white/60 backdrop-blur-xl sticky top-0 z-50">
                 <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
                     {/* Logo */}
                     <Link to="/" className="flex items-center gap-3 group">

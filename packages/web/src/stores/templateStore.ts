@@ -1,6 +1,6 @@
 /**
  * Zustand store for the redesigned calculator system.
- * Categories + Calculators + Temp Items — all local state.
+ * Centralized Input Hub + Drag-and-Drop Calculator Builder.
  */
 
 import { create } from 'zustand';
@@ -8,22 +8,28 @@ import { persist } from 'zustand/middleware';
 import Decimal from 'decimal.js';
 import type {
     Category,
-    Calculator,
-    CalculatorRow,
+    InputDefinition,
+    InputGroup,
+    InputType,
     DropdownOption,
+    Calculator,
+    CalculatorFormula,
+    FormulaToken,
+    LocalRate,
+    RefTree,
     ReferenceItem,
-    RowType,
-    Operation,
-    TempItem,
-    CostBlock,
-    CostBlockType,
-    BlockFormula,
-    RowFormula,
+    UserTempItem,
 } from '../types/calculator';
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
 const uid = () => crypto.randomUUID();
+
+const labelToKey = (label: string): string =>
+    label
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_|_$/g, '') || `field_${Date.now()}`;
 
 // ─── Store Interface ─────────────────────────────────────────────────
 
@@ -36,67 +42,63 @@ interface AppStore {
     getCategoryChildren: (parentId: string | null) => Category[];
     getCategoryBreadcrumb: (id: string) => Category[];
 
+    // ── Input Definitions (Centralized Hub) ──
+    inputDefinitions: InputDefinition[];
+    inputGroups: InputGroup[];
+    addInput: (type: InputType) => string;
+    removeInput: (id: string) => void;
+    updateInput: (id: string, updates: Partial<InputDefinition>) => void;
+    moveInput: (id: string, direction: 'up' | 'down') => void;
+    getInputUsage: (id: string) => { calcId: string; calcName: string }[];
+    addInputGroup: (name: string) => string;
+    removeInputGroup: (id: string) => void;
+    updateInputGroup: (id: string, updates: Partial<InputGroup>) => void;
+
+    // ── Input Dropdown Options ──
+    addDropdownOption: (inputId: string) => void;
+    removeDropdownOption: (inputId: string, optionId: string) => void;
+    updateDropdownOption: (inputId: string, optionId: string, updates: Partial<DropdownOption>) => void;
+
+    // ── Input Reference Items ──
+    addReferenceItem: (inputId: string) => void;
+    removeReferenceItem: (inputId: string, itemId: string) => void;
+    updateReferenceItem: (inputId: string, itemId: string, updates: Partial<ReferenceItem>) => void;
+
+    // ── Input Ref Tree ──
+    setRefTree: (inputId: string, refTree: RefTree | undefined) => void;
+
     // ── Calculators ──
     calculators: Calculator[];
-    selectedCalculatorId: string | null;
-    selectCalculator: (id: string | null) => void;
     createCalculator: (categoryId: string, name: string) => void;
     deleteCalculator: (id: string) => void;
     getCalculatorForCategory: (categoryId: string) => Calculator | undefined;
 
-    // ── Calculator Rows ──
-    addRow: (calculatorId: string) => void;
-    addCalculatedRow: (calculatorId: string, label: string, key: string, formula: RowFormula) => void;
-    removeRow: (calculatorId: string, rowId: string) => void;
-    updateRow: (calculatorId: string, rowId: string, updates: Partial<CalculatorRow>) => void;
-    moveRow: (calculatorId: string, rowId: string, direction: 'up' | 'down') => void;
-    setGrandTotalRow: (calculatorId: string, rowId: string) => void;
+    // ── Calculator Formulas ──
+    addFormula: (calcId: string) => string;
+    removeFormula: (calcId: string, formulaId: string) => void;
+    updateFormula: (calcId: string, formulaId: string, updates: Partial<CalculatorFormula>) => void;
+    setFormulaTokens: (calcId: string, formulaId: string, tokens: FormulaToken[]) => void;
+    moveFormula: (calcId: string, formulaId: string, direction: 'up' | 'down') => void;
 
-    // ── Dropdown Options ──
-    addDropdownOption: (calculatorId: string, rowId: string) => void;
-    removeDropdownOption: (calculatorId: string, rowId: string, optionIndex: number) => void;
-    updateDropdownOption: (
-        calculatorId: string,
-        rowId: string,
-        optionIndex: number,
-        updates: Partial<DropdownOption>
-    ) => void;
+    // ── Calculator Used Inputs ──
+    addUsedInput: (calcId: string, inputId: string) => void;
+    removeUsedInput: (calcId: string, inputId: string) => void;
 
-    // ── Formula ──
-    updateRowFormula: (
-        calculatorId: string,
-        rowId: string,
-        formula: { operands: string[]; operation: Operation }
-    ) => void;
-    addFormulaOperand: (calculatorId: string, rowId: string, operand: string) => void;
-    removeFormulaOperand: (calculatorId: string, rowId: string, operandIndex: number) => void;
+    // ── Calculator Local Rates ──
+    addLocalRate: (calcId: string) => string;
+    removeLocalRate: (calcId: string, rateId: string) => void;
+    updateLocalRate: (calcId: string, rateId: string, updates: Partial<LocalRate>) => void;
 
-    // ── Cost Blocks ──
-    addCostBlock: (calculatorId: string, label: string, blockType: CostBlockType) => void;
-    updateCostBlock: (calculatorId: string, blockId: string, updates: Partial<CostBlock>) => void;
-    removeCostBlock: (calculatorId: string, blockId: string) => void;
-    moveCostBlock: (calculatorId: string, blockId: string, direction: 'up' | 'down') => void;
-    addBlockFormula: (calculatorId: string, blockId: string, formula: Omit<BlockFormula, 'id'>) => void;
-    updateBlockFormula: (calculatorId: string, blockId: string, formulaId: string, updates: Partial<BlockFormula>) => void;
-    removeBlockFormula: (calculatorId: string, blockId: string, formulaId: string) => void;
-
-    // ── Reference Items (per input row) ──
-    addReferenceItem: (calculatorId: string, rowId: string) => void;
-    removeReferenceItem: (calculatorId: string, rowId: string, itemId: string) => void;
-    updateReferenceItem: (calculatorId: string, rowId: string, itemId: string, updates: Partial<ReferenceItem>) => void;
-
-    // ── Temp Items (per-calculator reference list) ──
-    addTempItem: (calculatorId: string, name: string, rate: string) => void;
-    removeTempItem: (calculatorId: string, itemId: string) => void;
-    updateTempItem: (calculatorId: string, itemId: string, updates: Partial<TempItem>) => void;
-
-    // ── Calculation ──
+    // ── Calculation Engine ──
     calculateResult: (
-        calculator: Calculator,
+        calc: Calculator,
         inputs: Record<string, string>,
         selectedDropdowns: Record<string, string>,
-        userTempItems: { name: string; rate: string }[]
-    ) => { rowResults: Record<string, string>; total: string; blockResults?: { blockKey: string; label: string; value: string; isActive: boolean }[] };
+        userTempItems: UserTempItem[],
+    ) => {
+        formulaResults: Record<string, string>;
+        total: string;
+    };
 }
 
 // ─── Store Implementation ────────────────────────────────────────────
@@ -110,52 +112,263 @@ export const useAppStore = create<AppStore>()(
 
             categories: [],
 
-            addCategory: (name, parentId) =>
-                set((s) => ({
+            addCategory(name, parentId) {
+                const siblings = get().categories.filter((c) => c.parentId === parentId);
+                set({
                     categories: [
-                        ...s.categories,
+                        ...get().categories,
                         {
                             id: uid(),
                             name,
                             parentId,
-                            order: s.categories.filter((c) => c.parentId === parentId).length + 1,
+                            order: siblings.length,
                         },
                     ],
-                })),
+                });
+            },
 
-            renameCategory: (id, name) =>
-                set((s) => ({
-                    categories: s.categories.map((c) => (c.id === id ? { ...c, name } : c)),
-                })),
+            renameCategory(id, name) {
+                set({ categories: get().categories.map((c) => (c.id === id ? { ...c, name } : c)) });
+            },
 
-            deleteCategory: (id) => {
-                // Recursively delete all children
+            deleteCategory(id) {
                 const getAllDescendants = (parentId: string): string[] => {
                     const children = get().categories.filter((c) => c.parentId === parentId);
                     return children.flatMap((c) => [c.id, ...getAllDescendants(c.id)]);
                 };
-                const idsToDelete = [id, ...getAllDescendants(id)];
-                set((s) => ({
-                    categories: s.categories.filter((c) => !idsToDelete.includes(c.id)),
-                    calculators: s.calculators.filter((calc) => !idsToDelete.includes(calc.categoryId)),
-                }));
+                const toDelete = new Set([id, ...getAllDescendants(id)]);
+                set({
+                    categories: get().categories.filter((c) => !toDelete.has(c.id)),
+                    calculators: get().calculators.filter((c) => !toDelete.has(c.categoryId)),
+                });
             },
 
-            getCategoryChildren: (parentId) =>
-                get()
+            getCategoryChildren(parentId) {
+                return get()
                     .categories.filter((c) => c.parentId === parentId)
-                    .sort((a, b) => a.order - b.order),
+                    .sort((a, b) => a.order - b.order);
+            },
 
-            getCategoryBreadcrumb: (id) => {
-                const result: Category[] = [];
-                let current = get().categories.find((c) => c.id === id);
+            getCategoryBreadcrumb(id) {
+                const cats = get().categories;
+                const chain: Category[] = [];
+                let current = cats.find((c) => c.id === id);
                 while (current) {
-                    result.unshift(current);
-                    current = current.parentId
-                        ? get().categories.find((c) => c.id === current!.parentId)
-                        : undefined;
+                    chain.unshift(current);
+                    current = current.parentId ? cats.find((c) => c.id === current!.parentId) : undefined;
                 }
-                return result;
+                return chain;
+            },
+
+            // ══════════════════════════════════════════════════════════════════
+            // INPUT DEFINITIONS (CENTRALIZED HUB)
+            // ══════════════════════════════════════════════════════════════════
+
+            inputDefinitions: [],
+            inputGroups: [],
+
+            addInput(type) {
+                const id = uid();
+                const order = get().inputDefinitions.length;
+                const defaultNames: Record<InputType, string> = {
+                    number: 'New Input',
+                    dropdown: 'New Dropdown',
+                    fixed: 'New Fixed Cost',
+                };
+                const name = defaultNames[type];
+                const newInput: InputDefinition = {
+                    id,
+                    name,
+                    key: labelToKey(name) + '_' + order,
+                    type,
+                    rate: '0',
+                    order,
+                    fixedValue: type === 'fixed' ? '0' : undefined,
+                    dropdownOptions: type === 'dropdown' ? [] : undefined,
+                    isRequired: false,
+                };
+                set({ inputDefinitions: [...get().inputDefinitions, newInput] });
+                return id;
+            },
+
+            removeInput(id) {
+                set({
+                    inputDefinitions: get().inputDefinitions.filter((i) => i.id !== id),
+                    // Also remove from all calculators' usedInputIds
+                    calculators: get().calculators.map((c) => ({
+                        ...c,
+                        usedInputIds: c.usedInputIds.filter((iid) => iid !== id),
+                        // Remove tokens referencing this input from all formulas
+                        formulas: c.formulas.map((f) => ({
+                            ...f,
+                            tokens: f.tokens.filter((t) => !(t.type === 'input' && t.value === id)),
+                        })),
+                    })),
+                });
+            },
+
+            updateInput(id, updates) {
+                set({
+                    inputDefinitions: get().inputDefinitions.map((i) => {
+                        if (i.id !== id) return i;
+                        const updated = { ...i, ...updates };
+                        // Auto-update key when name changes
+                        if (updates.name && !updates.key) {
+                            updated.key = labelToKey(updates.name) + '_' + i.order;
+                        }
+                        return updated;
+                    }),
+                });
+            },
+
+            moveInput(id, direction) {
+                const defs = [...get().inputDefinitions].sort((a, b) => a.order - b.order);
+                const idx = defs.findIndex((d) => d.id === id);
+                if (idx < 0) return;
+                const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+                if (swapIdx < 0 || swapIdx >= defs.length) return;
+                const tempOrder = defs[idx].order;
+                defs[idx] = { ...defs[idx], order: defs[swapIdx].order };
+                defs[swapIdx] = { ...defs[swapIdx], order: tempOrder };
+                set({ inputDefinitions: defs });
+            },
+
+            getInputUsage(id) {
+                return get()
+                    .calculators.filter((c) => c.usedInputIds.includes(id))
+                    .map((c) => ({ calcId: c.id, calcName: c.name }));
+            },
+
+            addInputGroup(name) {
+                const id = uid();
+                set({
+                    inputGroups: [
+                        ...get().inputGroups,
+                        { id, name, order: get().inputGroups.length },
+                    ],
+                });
+                return id;
+            },
+
+            removeInputGroup(id) {
+                set({
+                    inputGroups: get().inputGroups.filter((g) => g.id !== id),
+                    inputDefinitions: get().inputDefinitions.map((i) =>
+                        i.groupId === id ? { ...i, groupId: undefined } : i,
+                    ),
+                });
+            },
+
+            updateInputGroup(id, updates) {
+                set({
+                    inputGroups: get().inputGroups.map((g) =>
+                        g.id === id ? { ...g, ...updates } : g,
+                    ),
+                });
+            },
+
+            // ══════════════════════════════════════════════════════════════════
+            // DROPDOWN OPTIONS (on Input Definitions)
+            // ══════════════════════════════════════════════════════════════════
+
+            addDropdownOption(inputId) {
+                set({
+                    inputDefinitions: get().inputDefinitions.map((i) => {
+                        if (i.id !== inputId) return i;
+                        const opts = i.dropdownOptions || [];
+                        return {
+                            ...i,
+                            dropdownOptions: [
+                                ...opts,
+                                { id: uid(), label: '', value: '', rate: '0' },
+                            ],
+                        };
+                    }),
+                });
+            },
+
+            removeDropdownOption(inputId, optionId) {
+                set({
+                    inputDefinitions: get().inputDefinitions.map((i) => {
+                        if (i.id !== inputId) return i;
+                        return {
+                            ...i,
+                            dropdownOptions: (i.dropdownOptions || []).filter((o) => o.id !== optionId),
+                        };
+                    }),
+                });
+            },
+
+            updateDropdownOption(inputId, optionId, updates) {
+                set({
+                    inputDefinitions: get().inputDefinitions.map((i) => {
+                        if (i.id !== inputId) return i;
+                        return {
+                            ...i,
+                            dropdownOptions: (i.dropdownOptions || []).map((o) =>
+                                o.id === optionId ? { ...o, ...updates } : o,
+                            ),
+                        };
+                    }),
+                });
+            },
+
+            // ══════════════════════════════════════════════════════════════════
+            // REFERENCE ITEMS (on Input Definitions)
+            // ══════════════════════════════════════════════════════════════════
+
+            addReferenceItem(inputId) {
+                set({
+                    inputDefinitions: get().inputDefinitions.map((i) => {
+                        if (i.id !== inputId) return i;
+                        const items = i.referenceItems || [];
+                        return {
+                            ...i,
+                            referenceItems: [
+                                ...items,
+                                { id: uid(), name: '', value: '0' },
+                            ],
+                        };
+                    }),
+                });
+            },
+
+            removeReferenceItem(inputId, itemId) {
+                set({
+                    inputDefinitions: get().inputDefinitions.map((i) => {
+                        if (i.id !== inputId) return i;
+                        return {
+                            ...i,
+                            referenceItems: (i.referenceItems || []).filter((r) => r.id !== itemId),
+                        };
+                    }),
+                });
+            },
+
+            updateReferenceItem(inputId, itemId, updates) {
+                set({
+                    inputDefinitions: get().inputDefinitions.map((i) => {
+                        if (i.id !== inputId) return i;
+                        return {
+                            ...i,
+                            referenceItems: (i.referenceItems || []).map((r) =>
+                                r.id === itemId ? { ...r, ...updates } : r,
+                            ),
+                        };
+                    }),
+                });
+            },
+
+            // ══════════════════════════════════════════════════════════════════
+            // REF TREE (on Input Definitions)
+            // ══════════════════════════════════════════════════════════════════
+
+            setRefTree(inputId, refTree) {
+                set({
+                    inputDefinitions: get().inputDefinitions.map((i) =>
+                        i.id === inputId ? { ...i, refTree } : i,
+                    ),
+                });
             },
 
             // ══════════════════════════════════════════════════════════════════
@@ -163,837 +376,352 @@ export const useAppStore = create<AppStore>()(
             // ══════════════════════════════════════════════════════════════════
 
             calculators: [],
-            selectedCalculatorId: null,
 
-            selectCalculator: (id) => set({ selectedCalculatorId: id }),
-
-            createCalculator: (categoryId, name) => {
-                const newCalc: Calculator = {
-                    id: uid(),
-                    name,
-                    categoryId,
-                    rows: [],
-                    costBlocks: [],
-                    tempItems: [],
-                };
-                set((s) => ({
-                    calculators: [...s.calculators, newCalc],
-                    selectedCalculatorId: newCalc.id,
-                }));
+            createCalculator(categoryId, name) {
+                const existing = get().calculators.find((c) => c.categoryId === categoryId);
+                if (existing) return;
+                set({
+                    calculators: [
+                        ...get().calculators,
+                        {
+                            id: uid(),
+                            name,
+                            categoryId,
+                            formulas: [],
+                            localRates: [],
+                            usedInputIds: [],
+                        },
+                    ],
+                });
             },
 
-            deleteCalculator: (id) =>
-                set((s) => ({
-                    calculators: s.calculators.filter((c) => c.id !== id),
-                    selectedCalculatorId: s.selectedCalculatorId === id ? null : s.selectedCalculatorId,
-                })),
-
-            getCalculatorForCategory: (categoryId) =>
-                get().calculators.find((c) => c.categoryId === categoryId),
-
-            // ══════════════════════════════════════════════════════════════════
-            // CALCULATOR ROWS
-            // ══════════════════════════════════════════════════════════════════
-
-            addRow: (calculatorId) => {
-                const rowId = uid();
-                set((s) => ({
-                    calculators: s.calculators.map((calc) =>
-                        calc.id === calculatorId
-                            ? {
-                                ...calc,
-                                rows: [
-                                    ...calc.rows,
-                                    {
-                                        id: rowId,
-                                        order: calc.rows.length + 1,
-                                        label: '',
-                                        key: '',
-                                        type: 'input' as RowType,
-                                        referenceItems: [],
-                                    },
-                                ],
-                                // Auto-create a linked temp item for this input row
-                                tempItems: [
-                                    ...(calc.tempItems || []),
-                                    { id: uid(), name: '', rate: '', autoFromRowId: rowId },
-                                ],
-                            }
-                            : calc
-                    ),
-                }));
+            deleteCalculator(id) {
+                set({ calculators: get().calculators.filter((c) => c.id !== id) });
             },
 
-            addCalculatedRow: (calculatorId, label, key, formula) =>
-                set((s) => ({
-                    calculators: s.calculators.map((calc) => {
-                        if (calc.id !== calculatorId) return calc;
-                        // Only auto-set isTotal if no other row already has it
-                        const hasExistingTotal = calc.rows.some((r) => r.isTotal);
+            getCalculatorForCategory(categoryId) {
+                return get().calculators.find((c) => c.categoryId === categoryId);
+            },
+
+            // ══════════════════════════════════════════════════════════════════
+            // CALCULATOR FORMULAS
+            // ══════════════════════════════════════════════════════════════════
+
+            addFormula(calcId) {
+                const id = uid();
+                set({
+                    calculators: get().calculators.map((c) => {
+                        if (c.id !== calcId) return c;
+                        const order = c.formulas.length;
                         return {
-                            ...calc,
-                            rows: [
-                                ...calc.rows,
+                            ...c,
+                            formulas: [
+                                ...c.formulas,
                                 {
-                                    id: uid(),
-                                    order: calc.rows.length + 1,
-                                    label,
-                                    key,
-                                    type: 'calculated' as RowType,
-                                    formula,
-                                    isTotal: !hasExistingTotal,
+                                    id,
+                                    label: `Formula ${order + 1}`,
+                                    key: `formula_${order + 1}`,
+                                    tokens: [],
+                                    order,
+                                    isTotal: false,
                                 },
                             ],
                         };
                     }),
-                })),
-
-            setGrandTotalRow: (calculatorId, rowId) =>
-                set((s) => ({
-                    calculators: s.calculators.map((calc) =>
-                        calc.id === calculatorId
-                            ? {
-                                ...calc,
-                                rows: calc.rows.map((r) => ({
-                                    ...r,
-                                    isTotal: r.id === rowId,
-                                })),
-                            }
-                            : calc
-                    ),
-                })),
-
-            removeRow: (calculatorId, rowId) =>
-                set((s) => ({
-                    calculators: s.calculators.map((calc) =>
-                        calc.id === calculatorId
-                            ? {
-                                ...calc,
-                                rows: calc.rows
-                                    .filter((r) => r.id !== rowId)
-                                    .map((r, i) => ({ ...r, order: i + 1 })),
-                                // Also remove the auto-created temp item linked to this row
-                                tempItems: (calc.tempItems || []).filter(
-                                    (t) => t.autoFromRowId !== rowId
-                                ),
-                            }
-                            : calc
-                    ),
-                })),
-
-            updateRow: (calculatorId, rowId, updates) =>
-                set((s) => ({
-                    calculators: s.calculators.map((calc) => {
-                        if (calc.id !== calculatorId) return calc;
-                        const currentRow = calc.rows.find((r) => r.id === rowId);
-                        let tempItems = calc.tempItems || [];
-
-                        // Sync label → auto temp item name
-                        if (updates.label !== undefined) {
-                            tempItems = tempItems.map((t) =>
-                                t.autoFromRowId === rowId
-                                    ? { ...t, name: updates.label! }
-                                    : t
-                            );
-                        }
-
-                        // Handle type changes: input ↔ other
-                        if (updates.type && currentRow && updates.type !== currentRow.type) {
-                            if (updates.type === 'input') {
-                                // Switched TO input → create linked temp item
-                                tempItems = [
-                                    ...tempItems,
-                                    { id: uid(), name: currentRow.label, rate: '', autoFromRowId: rowId },
-                                ];
-                            } else if (currentRow.type === 'input') {
-                                // Switched FROM input → remove linked temp item
-                                tempItems = tempItems.filter((t) => t.autoFromRowId !== rowId);
-                            }
-                        }
-
-                        return {
-                            ...calc,
-                            rows: calc.rows.map((r) =>
-                                r.id === rowId ? { ...r, ...updates } : r
-                            ),
-                            tempItems,
-                        };
-                    }),
-                })),
-
-            moveRow: (calculatorId, rowId, direction) =>
-                set((s) => ({
-                    calculators: s.calculators.map((calc) => {
-                        if (calc.id !== calculatorId) return calc;
-                        const rows = [...calc.rows];
-                        const index = rows.findIndex((r) => r.id === rowId);
-                        if (index < 0) return calc;
-                        const target = direction === 'up' ? index - 1 : index + 1;
-                        if (target < 0 || target >= rows.length) return calc;
-                        [rows[index], rows[target]] = [rows[target], rows[index]];
-                        return {
-                            ...calc,
-                            rows: rows.map((r, i) => ({ ...r, order: i + 1 })),
-                        };
-                    }),
-                })),
-
-            // ══════════════════════════════════════════════════════════════════
-            // DROPDOWN OPTIONS
-            // ══════════════════════════════════════════════════════════════════
-
-            addDropdownOption: (calculatorId, rowId) =>
-                set((s) => ({
-                    calculators: s.calculators.map((calc) =>
-                        calc.id === calculatorId
-                            ? {
-                                ...calc,
-                                rows: calc.rows.map((r) =>
-                                    r.id === rowId
-                                        ? {
-                                            ...r,
-                                            dropdownOptions: [
-                                                ...(r.dropdownOptions || []),
-                                                { label: '', value: '', rate: '0' },
-                                            ],
-                                        }
-                                        : r
-                                ),
-                            }
-                            : calc
-                    ),
-                })),
-
-            removeDropdownOption: (calculatorId, rowId, optionIndex) =>
-                set((s) => ({
-                    calculators: s.calculators.map((calc) =>
-                        calc.id === calculatorId
-                            ? {
-                                ...calc,
-                                rows: calc.rows.map((r) =>
-                                    r.id === rowId
-                                        ? {
-                                            ...r,
-                                            dropdownOptions: (r.dropdownOptions || []).filter(
-                                                (_, i) => i !== optionIndex
-                                            ),
-                                        }
-                                        : r
-                                ),
-                            }
-                            : calc
-                    ),
-                })),
-
-            updateDropdownOption: (calculatorId, rowId, optionIndex, updates) =>
-                set((s) => ({
-                    calculators: s.calculators.map((calc) =>
-                        calc.id === calculatorId
-                            ? {
-                                ...calc,
-                                rows: calc.rows.map((r) =>
-                                    r.id === rowId
-                                        ? {
-                                            ...r,
-                                            dropdownOptions: (r.dropdownOptions || []).map((opt, i) =>
-                                                i === optionIndex ? { ...opt, ...updates } : opt
-                                            ),
-                                        }
-                                        : r
-                                ),
-                            }
-                            : calc
-                    ),
-                })),
-
-            // ══════════════════════════════════════════════════════════════════
-            // FORMULA
-            // ══════════════════════════════════════════════════════════════════
-
-            updateRowFormula: (calculatorId, rowId, formula) =>
-                set((s) => ({
-                    calculators: s.calculators.map((calc) =>
-                        calc.id === calculatorId
-                            ? {
-                                ...calc,
-                                rows: calc.rows.map((r) =>
-                                    r.id === rowId ? { ...r, formula } : r
-                                ),
-                            }
-                            : calc
-                    ),
-                })),
-
-            addFormulaOperand: (calculatorId, rowId, operand) =>
-                set((s) => ({
-                    calculators: s.calculators.map((calc) =>
-                        calc.id === calculatorId
-                            ? {
-                                ...calc,
-                                rows: calc.rows.map((r) =>
-                                    r.id === rowId
-                                        ? {
-                                            ...r,
-                                            formula: {
-                                                operation: r.formula?.operation || '+',
-                                                operands: [...(r.formula?.operands || []), operand],
-                                            },
-                                        }
-                                        : r
-                                ),
-                            }
-                            : calc
-                    ),
-                })),
-
-            removeFormulaOperand: (calculatorId, rowId, operandIndex) =>
-                set((s) => ({
-                    calculators: s.calculators.map((calc) =>
-                        calc.id === calculatorId
-                            ? {
-                                ...calc,
-                                rows: calc.rows.map((r) =>
-                                    r.id === rowId && r.formula
-                                        ? {
-                                            ...r,
-                                            formula: {
-                                                ...r.formula,
-                                                operands: r.formula.operands.filter((_, i) => i !== operandIndex),
-                                            },
-                                        }
-                                        : r
-                                ),
-                            }
-                            : calc
-                    ),
-                })),
-
-            // ══════════════════════════════════════════════════════════════════
-            // TEMP ITEMS (per-calculator)
-            // ══════════════════════════════════════════════════════════════════
-
-            addTempItem: (calculatorId, name, rate) =>
-                set((s) => ({
-                    calculators: s.calculators.map((calc) =>
-                        calc.id === calculatorId
-                            ? { ...calc, tempItems: [...calc.tempItems, { id: uid(), name, rate }] }
-                            : calc
-                    ),
-                })),
-
-            removeTempItem: (calculatorId, itemId) =>
-                set((s) => ({
-                    calculators: s.calculators.map((calc) =>
-                        calc.id === calculatorId
-                            ? { ...calc, tempItems: calc.tempItems.filter((t) => t.id !== itemId) }
-                            : calc
-                    ),
-                })),
-
-            updateTempItem: (calculatorId, itemId, updates) =>
-                set((s) => ({
-                    calculators: s.calculators.map((calc) =>
-                        calc.id === calculatorId
-                            ? {
-                                ...calc,
-                                tempItems: calc.tempItems.map((t) =>
-                                    t.id === itemId ? { ...t, ...updates } : t
-                                ),
-                            }
-                            : calc
-                    ),
-                })),
-
-            // ══════════════════════════════════════════════════════════════════
-            // COST BLOCKS
-            // ══════════════════════════════════════════════════════════════════
-
-            addCostBlock: (calculatorId, label, blockType) => {
-                const key = label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'block';
-                set((s) => ({
-                    calculators: s.calculators.map((calc) => {
-                        if (calc.id !== calculatorId) return calc;
-                        const blocks = calc.costBlocks || [];
-                        const newBlock: CostBlock = {
-                            id: uid(),
-                            key: `${key}_${blocks.length + 1}`,
-                            label,
-                            orderIndex: blocks.length + 1,
-                            blockType,
-                            isActive: true,
-                            isOptional: false,
-                            outputKey: '',
-                            formulas: [],
-                        };
-                        return { ...calc, costBlocks: [...blocks, newBlock] };
-                    }),
-                }));
+                });
+                return id;
             },
 
-            updateCostBlock: (calculatorId, blockId, updates) =>
-                set((s) => ({
-                    calculators: s.calculators.map((calc) =>
-                        calc.id === calculatorId
-                            ? {
-                                ...calc,
-                                costBlocks: (calc.costBlocks || []).map((b) =>
-                                    b.id === blockId ? { ...b, ...updates } : b
-                                ),
-                            }
-                            : calc
-                    ),
-                })),
-
-            removeCostBlock: (calculatorId, blockId) =>
-                set((s) => ({
-                    calculators: s.calculators.map((calc) =>
-                        calc.id === calculatorId
-                            ? {
-                                ...calc,
-                                costBlocks: (calc.costBlocks || [])
-                                    .filter((b) => b.id !== blockId)
-                                    .map((b, i) => ({ ...b, orderIndex: i + 1 })),
-                            }
-                            : calc
-                    ),
-                })),
-
-            moveCostBlock: (calculatorId, blockId, direction) =>
-                set((s) => ({
-                    calculators: s.calculators.map((calc) => {
-                        if (calc.id !== calculatorId) return calc;
-                        const blocks = [...(calc.costBlocks || [])];
-                        const index = blocks.findIndex((b) => b.id === blockId);
-                        if (index < 0) return calc;
-                        const target = direction === 'up' ? index - 1 : index + 1;
-                        if (target < 0 || target >= blocks.length) return calc;
-                        [blocks[index], blocks[target]] = [blocks[target], blocks[index]];
+            removeFormula(calcId, formulaId) {
+                set({
+                    calculators: get().calculators.map((c) => {
+                        if (c.id !== calcId) return c;
                         return {
-                            ...calc,
-                            costBlocks: blocks.map((b, i) => ({ ...b, orderIndex: i + 1 })),
+                            ...c,
+                            formulas: c.formulas.filter((f) => f.id !== formulaId),
                         };
                     }),
-                })),
+                });
+            },
 
-            addBlockFormula: (calculatorId, blockId, formula) =>
-                set((s) => ({
-                    calculators: s.calculators.map((calc) =>
-                        calc.id === calculatorId
-                            ? {
-                                ...calc,
-                                costBlocks: (calc.costBlocks || []).map((b) => {
-                                    if (b.id !== blockId) return b;
-                                    const newFormula: BlockFormula = { ...formula, id: uid() };
-                                    const updatedFormulas = [...b.formulas, newFormula];
-                                    return {
-                                        ...b,
-                                        formulas: updatedFormulas,
-                                        // Auto-set outputKey to the last formula's outputKey
-                                        outputKey: newFormula.outputKey,
-                                    };
-                                }),
-                            }
-                            : calc
-                    ),
-                })),
+            updateFormula(calcId, formulaId, updates) {
+                set({
+                    calculators: get().calculators.map((c) => {
+                        if (c.id !== calcId) return c;
+                        return {
+                            ...c,
+                            formulas: c.formulas.map((f) =>
+                                f.id === formulaId ? { ...f, ...updates } : f,
+                            ),
+                        };
+                    }),
+                });
+            },
 
-            updateBlockFormula: (calculatorId, blockId, formulaId, updates) =>
-                set((s) => ({
-                    calculators: s.calculators.map((calc) =>
-                        calc.id === calculatorId
-                            ? {
-                                ...calc,
-                                costBlocks: (calc.costBlocks || []).map((b) =>
-                                    b.id === blockId
-                                        ? {
-                                            ...b,
-                                            formulas: b.formulas.map((f) =>
-                                                f.id === formulaId ? { ...f, ...updates } : f
-                                            ),
-                                        }
-                                        : b
-                                ),
-                            }
-                            : calc
-                    ),
-                })),
+            setFormulaTokens(calcId, formulaId, tokens) {
+                set({
+                    calculators: get().calculators.map((c) => {
+                        if (c.id !== calcId) return c;
+                        return {
+                            ...c,
+                            formulas: c.formulas.map((f) =>
+                                f.id === formulaId ? { ...f, tokens } : f,
+                            ),
+                        };
+                    }),
+                });
+            },
 
-            removeBlockFormula: (calculatorId, blockId, formulaId) =>
-                set((s) => ({
-                    calculators: s.calculators.map((calc) =>
-                        calc.id === calculatorId
-                            ? {
-                                ...calc,
-                                costBlocks: (calc.costBlocks || []).map((b) => {
-                                    if (b.id !== blockId) return b;
-                                    const updatedFormulas = b.formulas
-                                        .filter((f) => f.id !== formulaId)
-                                        .map((f, i) => ({ ...f, orderIndex: i + 1 }));
-                                    return {
-                                        ...b,
-                                        formulas: updatedFormulas,
-                                        outputKey: updatedFormulas.length > 0
-                                            ? updatedFormulas[updatedFormulas.length - 1].outputKey
-                                            : '',
-                                    };
-                                }),
-                            }
-                            : calc
-                    ),
-                })),
+            moveFormula(calcId, formulaId, direction) {
+                set({
+                    calculators: get().calculators.map((c) => {
+                        if (c.id !== calcId) return c;
+                        const sorted = [...c.formulas].sort((a, b) => a.order - b.order);
+                        const idx = sorted.findIndex((f) => f.id === formulaId);
+                        if (idx < 0) return c;
+                        const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+                        if (swapIdx < 0 || swapIdx >= sorted.length) return c;
+                        const tempOrder = sorted[idx].order;
+                        sorted[idx] = { ...sorted[idx], order: sorted[swapIdx].order };
+                        sorted[swapIdx] = { ...sorted[swapIdx], order: tempOrder };
+                        return { ...c, formulas: sorted };
+                    }),
+                });
+            },
 
             // ══════════════════════════════════════════════════════════════════
-            // REFERENCE ITEMS (per input row)
+            // CALCULATOR USED INPUTS
             // ══════════════════════════════════════════════════════════════════
 
-            addReferenceItem: (calculatorId, rowId) =>
-                set((s) => ({
-                    calculators: s.calculators.map((calc) =>
-                        calc.id === calculatorId
-                            ? {
-                                ...calc,
-                                rows: calc.rows.map((r) =>
-                                    r.id === rowId
-                                        ? {
-                                            ...r,
-                                            referenceItems: [
-                                                ...(r.referenceItems || []),
-                                                { id: uid(), name: '', value: '' },
-                                            ],
-                                        }
-                                        : r
-                                ),
-                            }
-                            : calc
-                    ),
-                })),
+            addUsedInput(calcId, inputId) {
+                set({
+                    calculators: get().calculators.map((c) => {
+                        if (c.id !== calcId || c.usedInputIds.includes(inputId)) return c;
+                        return { ...c, usedInputIds: [...c.usedInputIds, inputId] };
+                    }),
+                });
+            },
 
-            removeReferenceItem: (calculatorId, rowId, itemId) =>
-                set((s) => ({
-                    calculators: s.calculators.map((calc) =>
-                        calc.id === calculatorId
-                            ? {
-                                ...calc,
-                                rows: calc.rows.map((r) =>
-                                    r.id === rowId
-                                        ? {
-                                            ...r,
-                                            referenceItems: (r.referenceItems || []).filter(
-                                                (item) => item.id !== itemId
-                                            ),
-                                        }
-                                        : r
-                                ),
-                            }
-                            : calc
-                    ),
-                })),
+            removeUsedInput(calcId, inputId) {
+                set({
+                    calculators: get().calculators.map((c) => {
+                        if (c.id !== calcId) return c;
+                        return {
+                            ...c,
+                            usedInputIds: c.usedInputIds.filter((iid) => iid !== inputId),
+                            // Also remove tokens referencing this input
+                            formulas: c.formulas.map((f) => ({
+                                ...f,
+                                tokens: f.tokens.filter((t) => !(t.type === 'input' && t.value === inputId)),
+                            })),
+                        };
+                    }),
+                });
+            },
 
-            updateReferenceItem: (calculatorId, rowId, itemId, updates) =>
-                set((s) => ({
-                    calculators: s.calculators.map((calc) =>
-                        calc.id === calculatorId
-                            ? {
-                                ...calc,
-                                rows: calc.rows.map((r) =>
-                                    r.id === rowId
-                                        ? {
-                                            ...r,
-                                            referenceItems: (r.referenceItems || []).map((item) =>
-                                                item.id === itemId ? { ...item, ...updates } : item
-                                            ),
-                                        }
-                                        : r
-                                ),
-                            }
-                            : calc
-                    ),
-                })),
+            // ══════════════════════════════════════════════════════════════════
+            // CALCULATOR LOCAL RATES
+            // ══════════════════════════════════════════════════════════════════
+
+            addLocalRate(calcId) {
+                const id = uid();
+                set({
+                    calculators: get().calculators.map((c) => {
+                        if (c.id !== calcId) return c;
+                        return {
+                            ...c,
+                            localRates: [
+                                ...c.localRates,
+                                { id, name: '', rate: '0' },
+                            ],
+                        };
+                    }),
+                });
+                return id;
+            },
+
+            removeLocalRate(calcId, rateId) {
+                set({
+                    calculators: get().calculators.map((c) => {
+                        if (c.id !== calcId) return c;
+                        return {
+                            ...c,
+                            localRates: c.localRates.filter((r) => r.id !== rateId),
+                        };
+                    }),
+                });
+            },
+
+            updateLocalRate(calcId, rateId, updates) {
+                set({
+                    calculators: get().calculators.map((c) => {
+                        if (c.id !== calcId) return c;
+                        return {
+                            ...c,
+                            localRates: c.localRates.map((r) =>
+                                r.id === rateId ? { ...r, ...updates } : r,
+                            ),
+                        };
+                    }),
+                });
+            },
 
             // ══════════════════════════════════════════════════════════════════
             // CALCULATION ENGINE
             // ══════════════════════════════════════════════════════════════════
 
-            calculateResult: (calculator, inputs, selectedDropdowns, userTempItems) => {
-                const rowResults: Record<string, string> = {};
+            calculateResult(calc, inputValues, selectedDropdowns, userTempItems) {
+                const inputDefs = get().inputDefinitions;
+                const formulaResults: Record<string, string> = {};
 
-                // Process rows in order (same as before)
-                for (const row of calculator.rows) {
-                    if (!row.key) continue;
+                // Build a value map: input keys → their values
+                const valueMap: Record<string, Decimal> = {};
 
+                // Populate from input definitions
+                for (const inputDef of inputDefs) {
+                    if (!calc.usedInputIds.includes(inputDef.id)) continue;
+
+                    if (inputDef.type === 'number') {
+                        const val = inputValues[inputDef.key];
+                        valueMap[inputDef.id] = val ? new Decimal(val || '0') : new Decimal(0);
+                    } else if (inputDef.type === 'dropdown') {
+                        const selected = selectedDropdowns[inputDef.key];
+                        if (selected && inputDef.dropdownOptions) {
+                            const opt = inputDef.dropdownOptions.find((o) => o.value === selected);
+                            valueMap[inputDef.id] = opt ? new Decimal(opt.rate || '0') : new Decimal(0);
+                        } else {
+                            valueMap[inputDef.id] = new Decimal(0);
+                        }
+                    } else if (inputDef.type === 'fixed') {
+                        valueMap[inputDef.id] = new Decimal(inputDef.fixedValue || '0');
+                    }
+                }
+
+                // Add local rates to value map
+                for (const lr of calc.localRates) {
+                    valueMap[`local_${lr.id}`] = new Decimal(lr.rate || '0');
+                }
+
+                // Evaluate formulas in order
+                const sortedFormulas = [...calc.formulas].sort((a, b) => a.order - b.order);
+
+                for (const formula of sortedFormulas) {
                     try {
-                        if (row.type === 'input') {
-                            rowResults[row.key] = inputs[row.key] || '0';
-                        } else if (row.type === 'fixed') {
-                            rowResults[row.key] = row.fixedValue || '0';
-                        } else if (row.type === 'dropdown') {
-                            const selectedValue = selectedDropdowns[row.key];
-                            const option = row.dropdownOptions?.find((o) => o.value === selectedValue);
-                            rowResults[row.key] = option?.rate || '0';
-                        } else if (row.type === 'calculated' && row.formula) {
-                            // ── Token-based formula evaluation (new system with brackets) ──
-                            if (row.formula.tokens && row.formula.tokens.length > 0) {
-                                const evalTokens = row.formula.tokens;
-                                // Shunting-yard algorithm for proper bracket & precedence handling
-                                const precedence = (op: string): number => {
-                                    if (op === '+' || op === '-' || op === '−') return 1;
-                                    if (op === '×' || op === '*' || op === '÷' || op === '/' || op === '%') return 2;
-                                    if (op === '^') return 3;
-                                    return 0;
-                                };
-                                const applyOp = (a: Decimal, b: Decimal, op: string): Decimal => {
-                                    switch (op) {
-                                        case '+': return a.plus(b);
-                                        case '-':
-                                        case '−': return a.minus(b);
-                                        case '×':
-                                        case '*': return a.times(b);
-                                        case '÷':
-                                        case '/': return b.isZero() ? a : a.dividedBy(b);
-                                        case '%': return a.times(b).dividedBy(100);
-                                        case '^': return a.pow(b);
-                                        default: return a;
-                                    }
-                                };
-
-                                const values: Decimal[] = [];
-                                const ops: string[] = [];
-
-                                const processOp = () => {
-                                    const op = ops.pop()!;
-                                    const b = values.pop()!;
-                                    const a = values.pop()!;
-                                    values.push(applyOp(a, b, op));
-                                };
-
-                                for (const tok of evalTokens) {
-                                    if (tok.type === 'field' || tok.type === 'number') {
-                                        const val = tok.type === 'number'
-                                            ? tok.value
-                                            : resolveOperand(tok.value, rowResults, calculator.rows);
-                                        values.push(new Decimal(val || '0'));
-                                    } else if (tok.type === 'bracket' && tok.value === '(') {
-                                        ops.push('(');
-                                    } else if (tok.type === 'bracket' && tok.value === ')') {
-                                        while (ops.length > 0 && ops[ops.length - 1] !== '(') {
-                                            processOp();
-                                        }
-                                        ops.pop(); // remove '('
-                                    } else if (tok.type === 'operator') {
-                                        while (
-                                            ops.length > 0 &&
-                                            ops[ops.length - 1] !== '(' &&
-                                            precedence(ops[ops.length - 1]) >= precedence(tok.value)
-                                        ) {
-                                            processOp();
-                                        }
-                                        ops.push(tok.value);
-                                    }
-                                }
-                                while (ops.length > 0) {
-                                    processOp();
-                                }
-
-                                const result = values.length > 0 ? values[0] : new Decimal(0);
-                                rowResults[row.key] = result.toDecimalPlaces(2).toString();
-                            } else {
-                                // ── Legacy formula evaluation (operands + single operation) ──
-                                const { operands, operation } = row.formula;
-                                if (operands.length === 0) {
-                                    rowResults[row.key] = '0';
-                                    continue;
-                                }
-
-                                let result = new Decimal(resolveOperand(operands[0], rowResults, calculator.rows));
-                                const op = operation as string;
-
-                                // Handle unary operators first (only use first operand)
-                                if (op === '√') {
-                                    result = result.sqrt();
-                                } else if (op === 'abs') {
-                                    result = result.abs();
-                                } else if (op === 'round') {
-                                    result = result.round();
-                                } else if (op === 'ceil') {
-                                    result = Decimal.ceil(result);
-                                } else if (op === 'floor') {
-                                    result = Decimal.floor(result);
-                                } else if (op === 'min') {
-                                    for (let i = 1; i < operands.length; i++) {
-                                        const val = new Decimal(resolveOperand(operands[i], rowResults, calculator.rows));
-                                        result = Decimal.min(result, val);
-                                    }
-                                } else if (op === 'max') {
-                                    for (let i = 1; i < operands.length; i++) {
-                                        const val = new Decimal(resolveOperand(operands[i], rowResults, calculator.rows));
-                                        result = Decimal.max(result, val);
-                                    }
-                                } else if (op === 'avg') {
-                                    for (let i = 1; i < operands.length; i++) {
-                                        const val = new Decimal(resolveOperand(operands[i], rowResults, calculator.rows));
-                                        result = result.plus(val);
-                                    }
-                                    result = result.dividedBy(operands.length);
-                                } else {
-                                    // Binary operators: applied sequentially
-                                    for (let i = 1; i < operands.length; i++) {
-                                        const val = new Decimal(resolveOperand(operands[i], rowResults, calculator.rows));
-                                        switch (op) {
-                                            case '+': result = result.plus(val); break;
-                                            case '-':
-                                            case '−': result = result.minus(val); break;
-                                            case '×':
-                                            case '*': result = result.times(val); break;
-                                            case '÷':
-                                            case '/': result = val.isZero() ? result : result.dividedBy(val); break;
-                                            case '%': result = result.times(val).dividedBy(100); break;
-                                            case '^': result = result.pow(val); break;
-                                        }
-                                    }
-                                }
-                                rowResults[row.key] = result.toDecimalPlaces(2).toString();
-                            }
-                        }
+                        const result = evaluateTokens(formula.tokens, valueMap);
+                        formulaResults[formula.key] = result.toFixed(2);
+                        valueMap[formula.id] = result; // Allow later formulas to reference
                     } catch {
-                        rowResults[row.key] = '0';
+                        formulaResults[formula.key] = '0';
+                        valueMap[formula.id] = new Decimal(0);
                     }
                 }
 
-                // Process cost blocks (if any)
-                const blockResults: { blockKey: string; label: string; value: string; isActive: boolean }[] = [];
-                const costBlocks = (calculator.costBlocks || []).filter((b) => b.isActive);
-                costBlocks.sort((a, b) => a.orderIndex - b.orderIndex);
-
-                for (const block of costBlocks) {
-                    // Execute each formula in the block
-                    const sortedFormulas = [...block.formulas].sort((a, b) => a.orderIndex - b.orderIndex);
-                    for (const formula of sortedFormulas) {
-                        try {
-                            if (formula.operands.length === 0) {
-                                rowResults[formula.outputKey] = '0';
-                                continue;
-                            }
-
-                            let result = new Decimal(resolveOperand(formula.operands[0], rowResults, calculator.rows));
-
-                            if (formula.operationType === 'sum') {
-                                // Sum: accumulate all operands
-                                for (let i = 1; i < formula.operands.length; i++) {
-                                    const val = new Decimal(resolveOperand(formula.operands[i], rowResults, calculator.rows));
-                                    result = result.plus(val);
-                                }
-                            } else {
-                                for (let i = 1; i < formula.operands.length; i++) {
-                                    const val = new Decimal(resolveOperand(formula.operands[i], rowResults, calculator.rows));
-                                    switch (formula.operationType) {
-                                        case '+': result = result.plus(val); break;
-                                        case '-': result = result.minus(val); break;
-                                        case '×': result = result.times(val); break;
-                                        case '÷': result = val.isZero() ? result : result.dividedBy(val); break;
-                                    }
-                                }
-                            }
-                            rowResults[formula.outputKey] = result.toDecimalPlaces(2).toString();
-                        } catch {
-                            rowResults[formula.outputKey] = '0';
-                        }
+                // Calculate total — sum of all formulas marked as total, or last formula
+                let total = new Decimal(0);
+                const totalFormulas = sortedFormulas.filter((f) => f.isTotal);
+                if (totalFormulas.length > 0) {
+                    for (const f of totalFormulas) {
+                        total = total.plus(new Decimal(formulaResults[f.key] || '0'));
                     }
-
-                    // Record block output
-                    blockResults.push({
-                        blockKey: block.key,
-                        label: block.label,
-                        value: rowResults[block.outputKey] || '0',
-                        isActive: block.isActive,
-                    });
-                }
-
-                // Find total row or use last calculated row or last block output
-                const totalRow = calculator.rows.find((r) => r.isTotal);
-                let total = new Decimal(totalRow ? rowResults[totalRow.key] || '0' : '0');
-
-                if (!totalRow && costBlocks.length > 0) {
-                    // Use last block's output as total
-                    const lastBlock = costBlocks[costBlocks.length - 1];
-                    total = new Decimal(rowResults[lastBlock.outputKey] || '0');
-                } else if (!totalRow) {
-                    const lastCalc = [...calculator.rows].reverse().find((r) => r.type === 'calculated' && r.key);
-                    if (lastCalc) total = new Decimal(rowResults[lastCalc.key] || '0');
+                } else if (sortedFormulas.length > 0) {
+                    const last = sortedFormulas[sortedFormulas.length - 1];
+                    total = new Decimal(formulaResults[last.key] || '0');
                 }
 
                 // Add user temp items
                 for (const item of userTempItems) {
-                    try {
+                    if (item.rate) {
                         total = total.plus(new Decimal(item.rate || '0'));
-                    } catch {
-                        // skip invalid
                     }
                 }
 
                 return {
-                    rowResults,
-                    total: total.toDecimalPlaces(2).toString(),
-                    blockResults: blockResults.length > 0 ? blockResults : undefined,
+                    formulaResults,
+                    total: total.toFixed(2),
                 };
             },
         }),
         {
-            name: 'arovave-calculator-store',
-            partialize: (state: AppStore) => ({
-                categories: state.categories,
-                calculators: state.calculators,
-                selectedCalculatorId: state.selectedCalculatorId,
-            }),
-            // Migration: sync existing input rows → temp items for old data
-            onRehydrateStorage: () => (state) => {
-                if (!state) return;
-                // Use setTimeout to run after Zustand finishes hydration
-                setTimeout(() => {
-                    const currentState = useAppStore.getState();
-                    let needsUpdate = false;
-                    const updatedCalcs = currentState.calculators.map((calc) => {
-                        const tempItems = [...(calc.tempItems || [])];
-                        const linkedRowIds = new Set(
-                            tempItems.filter((t) => t.autoFromRowId).map((t) => t.autoFromRowId)
-                        );
-                        let calcChanged = false;
-                        for (const row of calc.rows) {
-                            if (row.type === 'input' && !linkedRowIds.has(row.id)) {
-                                tempItems.push({ id: uid(), name: row.label || '', rate: '', autoFromRowId: row.id });
-                                calcChanged = true;
-                            }
-                        }
-                        if (calcChanged) {
-                            needsUpdate = true;
-                            return { ...calc, tempItems };
-                        }
-                        return calc;
-                    });
-                    if (needsUpdate) {
-                        useAppStore.setState({ calculators: updatedCalcs });
-                    }
-                }, 0);
-            },
-        }
-    )
+            name: 'arovave-calculator-v2',
+        },
+    ),
 );
 
-// Helper: resolve an operand to a decimal string
-// Also accepts rows array to look up by row ID (for backward compat with old data)
-function resolveOperand(operand: string, rowResults: Record<string, string>, rows?: { id: string; key: string }[]): string {
-    // If it's a row key, use the result
-    if (operand in rowResults) return rowResults[operand];
-    // If it's a row ID, find the row key first
-    if (rows) {
-        const row = rows.find((r) => r.id === operand);
-        if (row && row.key in rowResults) return rowResults[row.key];
-    }
-    // If it's a dropdown rate reference like "material.rate"
-    if (operand.endsWith('.rate')) {
-        const baseKey = operand.replace('.rate', '');
-        if (baseKey in rowResults) return rowResults[baseKey];
-    }
-    // Otherwise treat as literal number
-    return operand;
-}
+// ─── Token Evaluator ────────────────────────────────────────────────
 
+function evaluateTokens(tokens: FormulaToken[], values: Record<string, Decimal>): Decimal {
+    if (tokens.length === 0) return new Decimal(0);
+
+    // Build an expression string and evaluate using basic shunting-yard
+    const outputQueue: Decimal[] = [];
+    const operatorStack: string[] = [];
+
+    const precedence: Record<string, number> = {
+        '+': 1,
+        '-': 1,
+        '×': 2,
+        '*': 2,
+        '÷': 2,
+        '/': 2,
+        '%': 2,
+    };
+
+    const applyOp = (op: string, b: Decimal, a: Decimal): Decimal => {
+        switch (op) {
+            case '+': return a.plus(b);
+            case '-': return a.minus(b);
+            case '×': case '*': return a.times(b);
+            case '÷': case '/': return b.isZero() ? new Decimal(0) : a.div(b);
+            case '%': return a.times(b).div(100);
+            default: return new Decimal(0);
+        }
+    };
+
+    for (const token of tokens) {
+        if (token.type === 'input' || token.type === 'formula_ref') {
+            const val = values[token.value] || new Decimal(0);
+            outputQueue.push(val);
+        } else if (token.type === 'number') {
+            outputQueue.push(new Decimal(token.value || '0'));
+        } else if (token.type === 'bracket') {
+            if (token.value === '(') {
+                operatorStack.push('(');
+            } else if (token.value === ')') {
+                while (operatorStack.length > 0 && operatorStack[operatorStack.length - 1] !== '(') {
+                    const op = operatorStack.pop()!;
+                    if (outputQueue.length < 2) break;
+                    const b = outputQueue.pop()!;
+                    const a = outputQueue.pop()!;
+                    outputQueue.push(applyOp(op, b, a));
+                }
+                operatorStack.pop(); // remove '('
+            }
+        } else if (token.type === 'operator') {
+            while (
+                operatorStack.length > 0 &&
+                operatorStack[operatorStack.length - 1] !== '(' &&
+                (precedence[operatorStack[operatorStack.length - 1]] || 0) >=
+                (precedence[token.value] || 0)
+            ) {
+                const op = operatorStack.pop()!;
+                if (outputQueue.length < 2) break;
+                const b = outputQueue.pop()!;
+                const a = outputQueue.pop()!;
+                outputQueue.push(applyOp(op, b, a));
+            }
+            operatorStack.push(token.value);
+        }
+    }
+
+    // Drain remaining operators
+    while (operatorStack.length > 0) {
+        const op = operatorStack.pop()!;
+        if (op === '(' || op === ')') continue;
+        if (outputQueue.length < 2) break;
+        const b = outputQueue.pop()!;
+        const a = outputQueue.pop()!;
+        outputQueue.push(applyOp(op, b, a));
+    }
+
+    return outputQueue.length > 0 ? outputQueue[0] : new Decimal(0);
+}

@@ -1,2 +1,2 @@
-// Dead code — removed dependency on FieldEditor
+// This component has been replaced by InputHub
 export { };

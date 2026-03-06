@@ -1,2 +1,2 @@
-// Dead code — removed @arovave/engine dependency
+// This component has been replaced by DragDropCalculatorBuilder
 export { };
