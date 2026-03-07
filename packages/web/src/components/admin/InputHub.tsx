@@ -269,19 +269,7 @@ function InputCard({
                     </div>
                 </div>
 
-                {/* Rate */}
-                {input.type === 'number' && (
-                    <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
-                        <label className="text-[10px] text-black/30 block text-right mb-0.5">Rate</label>
-                        <input
-                            type="text"
-                            value={input.rate}
-                            onChange={(e) => onUpdate({ rate: e.target.value })}
-                            className="w-20 text-right text-sm font-mono font-semibold text-black bg-black/[0.03] rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-black/10 border border-black/5"
-                            placeholder="0"
-                        />
-                    </div>
-                )}
+
 
                 {/* Fixed Value */}
                 {input.type === 'fixed' && (

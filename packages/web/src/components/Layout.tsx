@@ -15,7 +15,7 @@ export function Layout() {
                     <Link to="/" className="flex items-center gap-3 group">
                         <img src={logo} alt="Arovave" className="w-9 h-9 object-contain rounded-2xl" />
                         <span className="text-base font-bold text-black group-hover:text-black/70 transition-colors">
-                            Arovave Calculator
+                            Arovave.in Calculator
                         </span>
                     </Link>
 

@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 import {
     Plus,
     Trash2,
@@ -13,6 +13,9 @@ import {
     Calculator,
     Layers,
     Combine,
+    Copy,
+    Eye,
+    Zap,
 } from 'lucide-react';
 import { useAppStore } from '../../stores/templateStore';
 import type { FormulaToken, InputDefinition, InputType } from '../../types/calculator';
@@ -47,7 +50,31 @@ const BRACKETS = [
 ];
 
 // ═══════════════════════════════════════════════════════════════════════
-// DRAG-AND-DROP CALCULATOR BUILDER  (Native HTML5 DnD — no libs needed)
+// FORMULA EXPRESSION PREVIEW (human-readable)
+// ═══════════════════════════════════════════════════════════════════════
+
+function getFormulaPreview(tokens: FormulaToken[], inputDefs: InputDefinition[], allFormulas: { id: string; label: string }[]): string {
+    if (tokens.length === 0) return '—';
+    return tokens
+        .map((t) => {
+            if (t.type === 'input') {
+                const def = inputDefs.find((d) => d.id === t.value);
+                return def?.name || t.label || '?';
+            }
+            if (t.type === 'formula_ref') {
+                const f = allFormulas.find((fm) => fm.id === t.value);
+                return `[${f?.label || t.label || 'Formula'}]`;
+            }
+            if (t.type === 'number') return t.value;
+            if (t.type === 'operator') return ` ${t.value} `;
+            if (t.type === 'bracket') return t.value;
+            return t.value;
+        })
+        .join('');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// DRAG-AND-DROP CALCULATOR BUILDER (Native HTML5 DnD)
 // ═══════════════════════════════════════════════════════════════════════
 
 export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: string }) {
@@ -63,6 +90,7 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
         addLocalRate,
         removeLocalRate,
         updateLocalRate,
+        updateCalculator,
     } = store;
 
     const calc = calculators.find((c) => c.id === calculatorId);
@@ -77,7 +105,13 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
 
     // Drag an input to the formula canvas
     const handleDragStart = (e: React.DragEvent, inputId: string) => {
-        e.dataTransfer.setData('text/plain', inputId);
+        e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'input', id: inputId }));
+        e.dataTransfer.effectAllowed = 'copy';
+    };
+
+    // Drag a formula result to another formula
+    const handleFormulaDragStart = (e: React.DragEvent, formulaId: string, formulaLabel: string) => {
+        e.dataTransfer.setData('text/plain', JSON.stringify({ type: 'formula_ref', id: formulaId, label: formulaLabel }));
         e.dataTransfer.effectAllowed = 'copy';
     };
 
@@ -94,25 +128,53 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
     const handleDrop = (e: React.DragEvent) => {
         e.preventDefault();
         setDragOverFormula(false);
-        const inputId = e.dataTransfer.getData('text/plain');
-        if (!inputId || !activeFormula) return;
+        const raw = e.dataTransfer.getData('text/plain');
+        if (!raw) return;
 
-        const input = inputDefinitions.find((i) => i.id === inputId);
-        if (!input) return;
+        // Parse the drag payload — supports both new JSON format and legacy plain IDs
+        let dragData: { type: string; id: string; label?: string };
+        try {
+            dragData = JSON.parse(raw);
+        } catch {
+            // Legacy fallback: treat as input ID
+            dragData = { type: 'input', id: raw };
+        }
 
-        // Add to used inputs if not already
-        addUsedInput(calculatorId, inputId);
+        // Auto-create a formula if none exists or none is active
+        let targetFormulaId = activeFormula;
+        if (!targetFormulaId || !calc.formulas.find((f) => f.id === targetFormulaId)) {
+            targetFormulaId = addFormula(calculatorId);
+            setActiveFormula(targetFormulaId);
+        }
 
-        // Add token
-        const formula = calc.formulas.find((f) => f.id === activeFormula);
+        const currentCalc = useAppStore.getState().calculators.find((c) => c.id === calculatorId);
+        const formula = currentCalc?.formulas.find((f) => f.id === targetFormulaId);
         if (!formula) return;
 
-        const newToken: FormulaToken = {
-            type: 'input',
-            value: inputId,
-            label: input.name,
-        };
-        store.setFormulaTokens(calculatorId, activeFormula, [...formula.tokens, newToken]);
+        let newToken: FormulaToken;
+
+        if (dragData.type === 'formula_ref') {
+            // Don't allow a formula to reference itself
+            if (dragData.id === targetFormulaId) return;
+            const refFormula = currentCalc?.formulas.find((f) => f.id === dragData.id);
+            newToken = {
+                type: 'formula_ref',
+                value: dragData.id,
+                label: refFormula?.label || dragData.label || 'Formula',
+            };
+        } else {
+            // Input drag
+            const input = inputDefinitions.find((i) => i.id === dragData.id);
+            if (!input) return;
+            addUsedInput(calculatorId, dragData.id);
+            newToken = {
+                type: 'input',
+                value: dragData.id,
+                label: input.name,
+            };
+        }
+
+        store.setFormulaTokens(calculatorId, targetFormulaId, [...formula.tokens, newToken]);
     };
 
     const addTokenToFormula = (formulaId: string, token: FormulaToken) => {
@@ -133,6 +195,18 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
         setActiveFormula(id);
     };
 
+    const handleDuplicateFormula = (formulaId: string) => {
+        const formula = calc.formulas.find((f) => f.id === formulaId);
+        if (!formula) return;
+        const newId = addFormula(calculatorId);
+        updateFormula(calculatorId, newId, {
+            label: `${formula.label} (copy)`,
+            isTotal: false,
+        });
+        store.setFormulaTokens(calculatorId, newId, [...formula.tokens]);
+        setActiveFormula(newId);
+    };
+
     return (
         <div className="flex gap-5 min-h-[500px]">
             {/* ─── Left Sidebar: Available Inputs ─── */}
@@ -141,7 +215,7 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                     Available Inputs
                 </h3>
                 <p className="text-[11px] text-black/30 px-1">
-                    Drag into the formula area or click to add
+                    Drag into formula or click to add
                 </p>
 
                 {inputDefinitions.length === 0 ? (
@@ -152,34 +226,43 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                         </p>
                     </div>
                 ) : (
-                    <div className="space-y-1.5">
+                    <div className="space-y-1.5 max-h-[420px] overflow-y-auto pr-1">
                         {inputDefinitions
                             .sort((a, b) => a.order - b.order)
                             .map((input) => {
                                 const Icon = TYPE_ICON[input.type];
+                                const isUsed = calc.usedInputIds.includes(input.id);
                                 return (
                                     <div
                                         key={input.id}
                                         draggable
                                         onDragStart={(e) => handleDragStart(e, input.id)}
                                         onClick={() => {
-                                            if (!activeFormula) return;
+                                            // Auto-create formula if none active
+                                            let targetId = activeFormula;
+                                            if (!targetId || !calc.formulas.find((f) => f.id === targetId)) {
+                                                targetId = addFormula(calculatorId);
+                                                setActiveFormula(targetId);
+                                            }
                                             addUsedInput(calculatorId, input.id);
-                                            addTokenToFormula(activeFormula, {
+                                            addTokenToFormula(targetId, {
                                                 type: 'input',
                                                 value: input.id,
                                                 label: input.name,
                                             });
                                         }}
-                                        className="flex items-center gap-2 px-3 py-2.5 rounded-xl border cursor-grab active:cursor-grabbing transition-all group bg-white border-black/8 hover:border-black/15 hover:shadow-sm select-none"
+                                        className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border cursor-grab active:cursor-grabbing transition-all group select-none ${isUsed
+                                            ? 'bg-blue-50/30 border-blue-200/40 hover:border-blue-300/60'
+                                            : 'bg-white border-black/8 hover:border-black/15 hover:shadow-sm'
+                                            }`}
                                     >
                                         <GripVertical className="w-3 h-3 text-black/15 group-hover:text-black/30 shrink-0" />
                                         <div className={`p-1 rounded-md border ${TYPE_COLOR[input.type]} shrink-0`}>
                                             <Icon className="w-3 h-3" />
                                         </div>
                                         <span className="text-xs font-medium text-black truncate flex-1">{input.name}</span>
-                                        {input.type === 'number' && input.rate !== '0' && (
-                                            <span className="text-[10px] text-black/30 font-mono shrink-0">₹{input.rate}</span>
+                                        {isUsed && (
+                                            <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />
                                         )}
                                     </div>
                                 );
@@ -195,14 +278,16 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                             Formula Results
                         </h3>
                         <p className="text-[11px] text-black/30 px-1">
-                            Click to use a formula's result
+                            Drag or click to use in another formula
                         </p>
                         <div className="space-y-1.5">
                             {sortedFormulas
                                 .filter((f) => f.id !== activeFormula)
                                 .map((f) => (
-                                    <button
+                                    <div
                                         key={f.id}
+                                        draggable
+                                        onDragStart={(e) => handleFormulaDragStart(e, f.id, f.label)}
                                         onClick={() => {
                                             if (!activeFormula) return;
                                             addTokenToFormula(activeFormula, {
@@ -211,14 +296,15 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                                                 label: f.label,
                                             });
                                         }}
-                                        className="w-full flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50/50 border border-emerald-200/50 hover:border-emerald-300 text-left transition-colors group"
-                                        title={`Use result of ${f.label}`}
+                                        className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl bg-emerald-50/50 border border-emerald-200/50 hover:border-emerald-300 text-left transition-colors group cursor-grab active:cursor-grabbing select-none"
+                                        title={`Drag or click to use result of ${f.label}`}
                                     >
+                                        <GripVertical className="w-3 h-3 text-emerald-300 group-hover:text-emerald-500 shrink-0" />
                                         <Combine className="w-3 h-3 text-emerald-500 shrink-0" />
                                         <span className="text-xs font-medium text-emerald-700 truncate">
                                             {f.label}
                                         </span>
-                                    </button>
+                                    </div>
                                 ))}
                         </div>
                     </>
@@ -228,12 +314,17 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
             {/* ─── Center: Formula Canvas ─── */}
             <div className="flex-1 space-y-4">
                 <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-bold text-black/50 uppercase tracking-wider">
+                    <h3 className="text-xs font-bold text-black/50 uppercase tracking-wider flex items-center gap-2">
                         Formulas
+                        {sortedFormulas.length > 0 && (
+                            <span className="text-[10px] bg-black/5 px-1.5 py-0.5 rounded-full font-bold text-black/40">
+                                {sortedFormulas.length}
+                            </span>
+                        )}
                     </h3>
                     <button
                         onClick={handleAddFormula}
-                        className="text-xs text-black/40 hover:text-black font-semibold flex items-center gap-1.5 transition-colors"
+                        className="text-xs text-black/40 hover:text-black font-semibold flex items-center gap-1.5 transition-colors px-3 py-1.5 rounded-xl hover:bg-black/[0.03]"
                         title="Add a new formula"
                     >
                         <Plus className="w-3 h-3" />
@@ -242,10 +333,19 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                 </div>
 
                 {sortedFormulas.length === 0 ? (
-                    <div className="text-center py-16 rounded-2xl border-2 border-dashed border-black/10">
+                    <div
+                        onDragOver={handleDragOver}
+                        onDragLeave={handleDragLeave}
+                        onDrop={handleDrop}
+                        className={`text-center py-16 rounded-2xl border-2 border-dashed transition-colors ${dragOverFormula ? 'border-blue-300 bg-blue-50/30' : 'border-black/10'
+                            }`}
+                    >
                         <Calculator className="w-10 h-10 text-black/15 mx-auto mb-3" />
-                        <p className="text-sm text-black/30 font-medium mb-3">
-                            No formulas yet. Click "Add Formula" to start building.
+                        <p className="text-sm text-black/30 font-medium mb-1">
+                            No formulas yet
+                        </p>
+                        <p className="text-xs text-black/20 mb-4 max-w-xs mx-auto">
+                            Drag an input here to auto-create your first formula, or click the button below.
                         </p>
                         <button
                             onClick={handleAddFormula}
@@ -276,25 +376,99 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                                         );
                                     }
                                 }}
+                                onDuplicate={() => handleDuplicateFormula(formula.id)}
                                 onMove={(dir) => moveFormula(calculatorId, formula.id, dir)}
                                 onUpdateLabel={(label) =>
                                     updateFormula(calculatorId, formula.id, { label })
                                 }
-                                onToggleTotal={() =>
+                                onToggleTotal={() => {
+                                    // Make grand total exclusive — only one per calculator
+                                    const newIsTotal = !formula.isTotal;
+                                    // First, clear isTotal on ALL formulas
+                                    sortedFormulas.forEach((f) => {
+                                        if (f.isTotal && f.id !== formula.id) {
+                                            updateFormula(calculatorId, f.id, { isTotal: false });
+                                        }
+                                    });
+                                    // Then set/toggle this one
                                     updateFormula(calculatorId, formula.id, {
-                                        isTotal: !formula.isTotal,
-                                    })
-                                }
+                                        isTotal: newIsTotal,
+                                    });
+                                }}
                                 onAddToken={(token) => addTokenToFormula(formula.id, token)}
                                 onRemoveToken={(tokenIdx) =>
                                     removeTokenFromFormula(formula.id, tokenIdx)
                                 }
                                 inputDefinitions={inputDefinitions}
+                                allFormulas={sortedFormulas}
                                 onDragOver={handleDragOver}
                                 onDragLeave={handleDragLeave}
                                 onDrop={handleDrop}
                             />
                         ))}
+
+                        {/* Quick "Add another" button after formulas list */}
+                        <button
+                            onClick={handleAddFormula}
+                            className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed border-black/8 text-xs text-black/25 hover:text-black/50 hover:border-black/15 font-semibold transition-all"
+                            title="Add another formula"
+                        >
+                            <Plus className="w-3.5 h-3.5" />
+                            Add Another Formula
+                        </button>
+
+                        {/* Grand Total Selector — tab style */}
+                        {sortedFormulas.length > 0 && (
+                            <div className="mt-4 bg-white rounded-2xl border border-black/8 p-3">
+                                <p className="text-[10px] font-bold text-black/40 uppercase tracking-wider mb-2 px-1">
+                                    🏆 Select Grand Total Formula
+                                </p>
+                                <div className="flex flex-wrap gap-1.5">
+                                    {sortedFormulas.map((f) => (
+                                        <button
+                                            key={f.id}
+                                            onClick={() => {
+                                                // Exclusive: clear all, then set this one
+                                                sortedFormulas.forEach((sf) => {
+                                                    if (sf.isTotal && sf.id !== f.id) {
+                                                        updateFormula(calculatorId, sf.id, { isTotal: false });
+                                                    }
+                                                });
+                                                updateFormula(calculatorId, f.id, { isTotal: !f.isTotal });
+                                            }}
+                                            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${f.isTotal
+                                                ? 'bg-emerald-500 text-white shadow-md'
+                                                : 'bg-black/[0.04] text-black/50 hover:bg-black/[0.08] hover:text-black/70'
+                                                }`}
+                                        >
+                                            {f.isTotal ? '🏆 ' : ''}{f.label}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                {/* Profit % input */}
+                                {sortedFormulas.some((f) => f.isTotal) && (
+                                    <div className="mt-3 pt-3 border-t border-black/5 flex items-center gap-3">
+                                        <label className="text-[11px] font-semibold text-black/40 shrink-0">
+                                            Profit %
+                                        </label>
+                                        <div className="relative">
+                                            <input
+                                                type="text"
+                                                value={calc.profitPercent || ''}
+                                                onChange={(e) => updateCalculator(calculatorId, { profitPercent: e.target.value })}
+                                                placeholder="0"
+                                                className="w-20 text-sm font-mono font-semibold text-black bg-black/[0.03] rounded-lg px-3 py-1.5 pr-7 outline-none focus:ring-2 focus:ring-emerald-200 border border-black/5"
+                                            />
+                                            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-black/30 font-bold">%</span>
+                                        </div>
+                                        <span className="text-[10px] text-black/25">
+                                            Added on top of grand total
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
@@ -305,7 +479,7 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                     Local Rates
                 </h3>
                 <p className="text-[11px] text-black/30 px-1">
-                    Rates specific to this calculator only
+                    Rates specific to this calculator
                 </p>
 
                 <div className="space-y-1.5">
@@ -374,12 +548,14 @@ function FormulaCard({
     isDragOver,
     onActivate,
     onRemove,
+    onDuplicate,
     onMove,
     onUpdateLabel,
     onToggleTotal,
     onAddToken,
     onRemoveToken,
     inputDefinitions,
+    allFormulas,
     onDragOver,
     onDragLeave,
     onDrop,
@@ -392,12 +568,14 @@ function FormulaCard({
     isDragOver: boolean;
     onActivate: () => void;
     onRemove: () => void;
+    onDuplicate: () => void;
     onMove: (dir: 'up' | 'down') => void;
     onUpdateLabel: (label: string) => void;
     onToggleTotal: () => void;
     onAddToken: (token: FormulaToken) => void;
     onRemoveToken: (index: number) => void;
     inputDefinitions: InputDefinition[];
+    allFormulas: { id: string; label: string }[];
     onDragOver: (e: React.DragEvent) => void;
     onDragLeave: () => void;
     onDrop: (e: React.DragEvent) => void;
@@ -418,31 +596,22 @@ function FormulaCard({
         }
     };
 
+    const preview = getFormulaPreview(formula.tokens, inputDefinitions, allFormulas);
+
     return (
         <div
             onClick={onActivate}
             className={`rounded-2xl border transition-all duration-300 ${isActive
-                    ? `bg-white border-black/15 shadow-lg shadow-black/10 ${isDragOver ? 'ring-2 ring-blue-400/50 border-blue-300' : ''
-                    }`
-                    : 'bg-white/60 border-black/6 hover:border-black/10 cursor-pointer'
+                ? `bg-white border-black/15 shadow-lg shadow-black/10 ${isDragOver ? 'ring-2 ring-blue-400/50 border-blue-300' : ''
+                }`
+                : 'bg-white/60 border-black/6 hover:border-black/10 cursor-pointer'
                 }`}
         >
             {/* Formula Header */}
             <div className="flex items-center gap-2 px-4 py-3">
-                {/* Total indicator */}
-                <button
-                    onClick={(e) => {
-                        e.stopPropagation();
-                        onToggleTotal();
-                    }}
-                    className={`p-1 rounded-lg transition-colors ${formula.isTotal
-                            ? 'bg-emerald-50 text-emerald-500'
-                            : 'text-black/15 hover:text-black/30'
-                        }`}
-                    title={formula.isTotal ? 'Marked as total formula' : 'Mark as total formula'}
-                >
-                    <Trophy className="w-3.5 h-3.5" />
-                </button>
+                {/* Order number */}
+                <span className={`text-[10px] font-bold w-5 h-5 rounded-md flex items-center justify-center shrink-0 ${isActive ? 'bg-black text-white' : 'bg-black/5 text-black/30'
+                    }`}>{index + 1}</span>
 
                 {/* Label */}
                 <input
@@ -450,13 +619,31 @@ function FormulaCard({
                     value={formula.label}
                     onChange={(e) => onUpdateLabel(e.target.value)}
                     onClick={(e) => e.stopPropagation()}
-                    className={`flex-1 text-sm font-semibold bg-transparent outline-none ${formula.isTotal ? 'text-emerald-700' : 'text-black'
+                    className={`flex-1 text-sm font-semibold bg-transparent outline-none min-w-0 ${formula.isTotal ? 'text-emerald-700' : 'text-black'
                         }`}
                     placeholder="Formula name..."
                 />
 
+                {/* Expression Preview (when collapsed) */}
+                {!isActive && formula.tokens.length > 0 && (
+                    <span className="text-[11px] text-black/30 font-mono truncate max-w-[200px] shrink-0"
+                        title={preview}>
+                        {preview}
+                    </span>
+                )}
+
                 {/* Actions */}
-                <div className="flex items-center gap-0.5">
+                <div className="flex items-center gap-0.5 shrink-0">
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onDuplicate();
+                        }}
+                        className="p-1 rounded text-black/15 hover:text-black transition-colors"
+                        title="Duplicate formula"
+                    >
+                        <Copy className="w-3.5 h-3.5" />
+                    </button>
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
@@ -492,24 +679,35 @@ function FormulaCard({
                 </div>
             </div>
 
-            {/* Token Display / Drop Zone */}
+            {/* Token Display / Drop Zone — Always show tokens, expand editor when active */}
             {isActive && (
                 <div className="px-4 pb-4 space-y-3 animate-slide-up">
+                    {/* Formula expression preview */}
+                    {formula.tokens.length > 0 && (
+                        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-gradient-to-r from-black/[0.02] to-transparent">
+                            <Eye className="w-3 h-3 text-black/20 shrink-0" />
+                            <span className="text-[11px] text-black/40 font-mono truncate">
+                                {formula.label} = {preview}
+                            </span>
+                        </div>
+                    )}
+
                     {/* Token Chain / Drop Zone */}
                     <div
                         onDragOver={onDragOver}
                         onDragLeave={onDragLeave}
                         onDrop={onDrop}
                         className={`min-h-[56px] rounded-xl border-2 border-dashed p-3 flex flex-wrap items-center gap-1.5 transition-colors ${isDragOver
-                                ? 'border-blue-300 bg-blue-50/30'
-                                : formula.tokens.length === 0
-                                    ? 'border-black/10 bg-black/[0.01]'
-                                    : 'border-black/8 bg-black/[0.01]'
+                            ? 'border-blue-300 bg-blue-50/30'
+                            : formula.tokens.length === 0
+                                ? 'border-black/10 bg-black/[0.01]'
+                                : 'border-black/8 bg-black/[0.01]'
                             }`}
                     >
                         {formula.tokens.length === 0 && (
-                            <span className="text-xs text-black/25 italic">
-                                Drag inputs here or use buttons below...
+                            <span className="text-xs text-black/25 italic flex items-center gap-2">
+                                <Zap className="w-3.5 h-3.5" />
+                                Drag inputs here or use buttons below to build your formula...
                             </span>
                         )}
                         {formula.tokens.map((token, idx) => (
@@ -569,6 +767,7 @@ function FormulaCard({
                                     }}
                                     autoFocus
                                     placeholder="0"
+                                    title="Enter a number"
                                     className="w-16 text-sm font-mono text-black bg-white border border-black/15 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-black/10"
                                 />
                                 <button
@@ -600,8 +799,8 @@ function FormulaCard({
                         {/* Quick-add inputs */}
                         {inputDefinitions.length > 0 && (
                             <div className="flex items-center gap-1 ml-auto">
-                                <span className="text-[10px] text-black/20 mr-1">Quick add:</span>
-                                {inputDefinitions.slice(0, 4).map((input) => (
+                                <span className="text-[10px] text-black/20 mr-1">Quick:</span>
+                                {inputDefinitions.slice(0, 3).map((input) => (
                                     <button
                                         key={input.id}
                                         onClick={() => {
@@ -628,7 +827,6 @@ function FormulaCard({
 }
 
 // We need access to addUsedInput inside FormulaCard's quick buttons
-// This is a self-contained reference from the store
 function addUsedInput(calcId: string, inputId: string) {
     useAppStore.getState().addUsedInput(calcId, inputId);
 }

@@ -18,11 +18,12 @@ export function SalesCalculator() {
         inputDefinitions,
         getCategoryChildren,
         getCategoryBreadcrumb,
-        getCalculatorForCategory,
+        getCalculatorsForCategory,
         calculateResult,
     } = store;
 
     const [currentCategoryId, setCurrentCategoryId] = useState<string | null>(null);
+    const [selectedCalcId, setSelectedCalcId] = useState<string | null>(null);
     const [inputs, setInputs] = useState<Record<string, string>>({});
     const [selectedDropdowns, setSelectedDropdowns] = useState<Record<string, string>>({});
     const [userTempItems, setUserTempItems] = useState<UserTempItem[]>([]);
@@ -33,7 +34,14 @@ export function SalesCalculator() {
     // Navigation
     const children = getCategoryChildren(currentCategoryId);
     const breadcrumb = currentCategoryId ? getCategoryBreadcrumb(currentCategoryId) : [];
-    const currentCalc = currentCategoryId ? getCalculatorForCategory(currentCategoryId) : undefined;
+
+    // Get ALL calculators for this category (not just first)
+    const categoryCalcs = currentCategoryId ? getCalculatorsForCategory(currentCategoryId) : [];
+    const currentCalc = selectedCalcId
+        ? categoryCalcs.find((c) => c.id === selectedCalcId)
+        : categoryCalcs.length > 0
+            ? categoryCalcs[0]
+            : undefined;
 
     // Get inputs used by this calculator
     const usedInputDefs = useMemo(() => {
@@ -51,6 +59,17 @@ export function SalesCalculator() {
 
     const navigateTo = useCallback((id: string | null) => {
         setCurrentCategoryId(id);
+        setSelectedCalcId(null);
+        setInputs({});
+        setSelectedDropdowns({});
+        setUserTempItems([]);
+        setShowTempList(false);
+        setFocusedInputId(null);
+        setRefTreePath([]);
+    }, []);
+
+    const switchCalculator = useCallback((calcId: string) => {
+        setSelectedCalcId(calcId);
         setInputs({});
         setSelectedDropdowns({});
         setUserTempItems([]);
@@ -151,7 +170,8 @@ export function SalesCalculator() {
                             {children.length > 0 && (
                                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                                     {children.map((cat) => {
-                                        const hasCalc = !!getCalculatorForCategory(cat.id);
+                                        const calcs = getCalculatorsForCategory(cat.id);
+                                        const hasCalc = calcs.length > 0;
                                         const subChildren = getCategoryChildren(cat.id);
 
                                         return (
@@ -167,7 +187,9 @@ export function SalesCalculator() {
                                                 )}
                                                 <span className="text-base font-semibold text-black block">{cat.name}</span>
                                                 <span className="text-[11px] text-black/40 mt-0.5 block">
-                                                    {hasCalc ? 'Calculator' : `${subChildren.length} sub-categories`}
+                                                    {hasCalc
+                                                        ? `${calcs.length} calculator${calcs.length > 1 ? 's' : ''}`
+                                                        : `${subChildren.length} sub-categories`}
                                                 </span>
                                             </button>
                                         );
@@ -178,7 +200,7 @@ export function SalesCalculator() {
                     )}
 
                     {/* Calculator form */}
-                    {currentCalc && (
+                    {categoryCalcs.length > 0 && (
                         <div className="space-y-4">
                             <button
                                 onClick={() => {
@@ -191,175 +213,257 @@ export function SalesCalculator() {
                                 Back to categories
                             </button>
 
-                            {/* Input Fields */}
-                            <div className="glass rounded-2xl overflow-hidden">
-                                <div className="border-b border-black/5 px-4 py-3 bg-black/[0.02]">
-                                    <h2 className="text-base font-semibold text-black">{currentCalc.name}</h2>
+                            {/* Calculator Tabs — shown when multiple calculators exist */}
+                            {categoryCalcs.length > 1 && (
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    {categoryCalcs.map((calc) => {
+                                        const isActive = currentCalc?.id === calc.id;
+                                        return (
+                                            <button
+                                                key={calc.id}
+                                                onClick={() => switchCalculator(calc.id)}
+                                                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 border ${isActive
+                                                    ? 'bg-black text-white border-black shadow-lg shadow-black/15'
+                                                    : 'bg-white/80 text-black/60 border-black/8 hover:border-black/15 hover:text-black hover:shadow-sm'
+                                                    }`}
+                                            >
+                                                <Calculator className="w-3.5 h-3.5" />
+                                                {calc.name}
+                                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${isActive
+                                                    ? 'bg-white/20 text-white/80'
+                                                    : 'bg-black/5 text-black/30'
+                                                    }`}>
+                                                    {calc.formulas.length}f
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
                                 </div>
+                            )}
 
-                                <div className="divide-y divide-black/5">
-                                    {usedInputDefs.map((inputDef) => (
-                                        <div
-                                            key={inputDef.id}
-                                            className="px-4 py-3 flex items-center justify-between gap-4"
-                                        >
-                                            <label className="text-base text-black shrink-0">
-                                                {inputDef.name}
-                                                {inputDef.isRequired && (
-                                                    <span className="text-red-400 ml-0.5">*</span>
-                                                )}
-                                            </label>
-
-                                            <div className="w-48 shrink-0">
-                                                {inputDef.type === 'number' && (
-                                                    <input
-                                                        type="text"
-                                                        value={inputs[inputDef.key] || ''}
-                                                        onChange={(e) =>
-                                                            setInputs((prev) => ({
-                                                                ...prev,
-                                                                [inputDef.key]: e.target.value,
-                                                            }))
-                                                        }
-                                                        placeholder="0"
-                                                        className={`w-full rounded-md bg-white border px-3 py-1.5 text-base text-black font-mono placeholder:text-black/30 outline-none focus:ring-1 text-right transition-colors ${focusedInputId === inputDef.id
-                                                            ? 'border-black/30 ring-black/20'
-                                                            : 'border-black/10 focus:ring-black/10'
-                                                            }`}
-                                                        onFocus={() => {
-                                                            setFocusedInputId(inputDef.id);
-                                                            setRefTreePath([]);
-                                                            if (
-                                                                inputDef.referenceItems?.length ||
-                                                                inputDef.refTree
-                                                            ) {
-                                                                setShowTempList(true);
-                                                            }
-                                                        }}
-                                                    />
-                                                )}
-
-                                                {inputDef.type === 'dropdown' && (
-                                                    <select
-                                                        value={selectedDropdowns[inputDef.key] || ''}
-                                                        onChange={(e) =>
-                                                            setSelectedDropdowns((prev) => ({
-                                                                ...prev,
-                                                                [inputDef.key]: e.target.value,
-                                                            }))
-                                                        }
-                                                        className="w-full rounded-md bg-white border border-black/10 px-3 py-1.5 text-base text-black outline-none focus:ring-1 focus:ring-black/10"
-                                                        title={inputDef.name}
-                                                    >
-                                                        <option value="">Select...</option>
-                                                        {inputDef.dropdownOptions?.map((opt) => (
-                                                            <option key={opt.id} value={opt.value}>
-                                                                {opt.label} — ₹{opt.rate}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                )}
-
-                                                {inputDef.type === 'fixed' && (
-                                                    <span className="text-base text-black font-mono block text-right">
-                                                        ₹{inputDef.fixedValue || '0'}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-
-                                {/* Formula Results */}
-                                {result && currentCalc.formulas.length > 0 && (
-                                    <div className="border-t border-black/5">
-                                        <div className="px-4 py-2 text-sm font-semibold text-black/50 bg-black/[0.02] flex items-center gap-2">
-                                            <span className="w-1.5 h-1.5 rounded-full bg-black/30" />
-                                            Calculations
-                                        </div>
-                                        {[...currentCalc.formulas]
-                                            .sort((a, b) => a.order - b.order)
-                                            .map((formula) => (
-                                                <div
-                                                    key={formula.id}
-                                                    className={`px-4 py-2.5 flex items-center justify-between border-t border-black/5 ${formula.isTotal ? 'bg-emerald-50/30' : ''
-                                                        }`}
-                                                >
-                                                    <span
-                                                        className={`text-base ${formula.isTotal
-                                                            ? 'font-bold text-emerald-700'
-                                                            : 'text-black/70'
-                                                            }`}
-                                                    >
-                                                        {formula.label}
-                                                    </span>
-                                                    <span
-                                                        className={`text-base font-mono font-semibold ${formula.isTotal
-                                                            ? 'text-emerald-700 text-lg'
-                                                            : 'text-black'
-                                                            }`}
-                                                    >
-                                                        ₹{result.formulaResults[formula.key] || '0'}
-                                                    </span>
-                                                </div>
-                                            ))}
+                            {/* Selected calculator's form */}
+                            {currentCalc && (
+                                <div className="glass rounded-2xl overflow-hidden">
+                                    <div className="border-b border-black/5 px-4 py-3 bg-black/[0.02]">
+                                        <h2 className="text-base font-semibold text-black">{currentCalc.name}</h2>
                                     </div>
-                                )}
 
-                                {/* User temp items */}
-                                {userTempItems.length > 0 && (
-                                    <div className="border-t border-black/5">
-                                        <div className="px-4 py-2 text-sm text-black/50 bg-black/[0.01]">
-                                            Additional Items
-                                        </div>
-                                        {userTempItems.map((item) => (
-                                            <div key={item.id} className="px-4 py-2 flex items-center gap-3 border-t border-black/5">
-                                                <input
-                                                    type="text"
-                                                    value={item.name}
-                                                    onChange={(e) => updateUserTempItem(item.id, { name: e.target.value })}
-                                                    placeholder="Item name..."
-                                                    className="flex-1 rounded bg-white border border-black/10 px-2 py-1 text-sm text-black placeholder:text-black/30 outline-none"
-                                                />
-                                                <input
-                                                    type="text"
-                                                    value={item.rate}
-                                                    onChange={(e) => updateUserTempItem(item.id, { rate: e.target.value })}
-                                                    placeholder="₹ Rate"
-                                                    className="w-24 rounded bg-white border border-black/10 px-2 py-1 text-sm text-black font-mono placeholder:text-black/30 outline-none text-right"
-                                                />
-                                                <button
-                                                    onClick={() => removeUserTempItem(item.id)}
-                                                    className="p-1 rounded text-black/20 hover:text-red-500 transition-colors"
-                                                    title="Remove item"
-                                                >
-                                                    <Trash2 className="w-3 h-3" />
-                                                </button>
+                                    <div className="divide-y divide-black/5">
+                                        {usedInputDefs.map((inputDef) => (
+                                            <div
+                                                key={inputDef.id}
+                                                className="px-4 py-3 flex items-center justify-between gap-4"
+                                            >
+                                                <label className="text-base text-black shrink-0">
+                                                    {inputDef.name}
+                                                    {inputDef.isRequired && (
+                                                        <span className="text-red-400 ml-0.5">*</span>
+                                                    )}
+                                                </label>
+
+                                                <div className="w-48 shrink-0">
+                                                    {inputDef.type === 'number' && (
+                                                        <input
+                                                            type="text"
+                                                            value={inputs[inputDef.key] || ''}
+                                                            onChange={(e) =>
+                                                                setInputs((prev) => ({
+                                                                    ...prev,
+                                                                    [inputDef.key]: e.target.value,
+                                                                }))
+                                                            }
+                                                            placeholder="0"
+                                                            className={`w-full rounded-md bg-white border px-3 py-1.5 text-base text-black font-mono placeholder:text-black/30 outline-none focus:ring-1 text-right transition-colors ${focusedInputId === inputDef.id
+                                                                ? 'border-black/30 ring-black/20'
+                                                                : 'border-black/10 focus:ring-black/10'
+                                                                }`}
+                                                            onFocus={() => {
+                                                                setFocusedInputId(inputDef.id);
+                                                                setRefTreePath([]);
+                                                                if (
+                                                                    inputDef.referenceItems?.length ||
+                                                                    inputDef.refTree
+                                                                ) {
+                                                                    setShowTempList(true);
+                                                                }
+                                                            }}
+                                                        />
+                                                    )}
+
+                                                    {inputDef.type === 'dropdown' && (
+                                                        <select
+                                                            value={selectedDropdowns[inputDef.key] || ''}
+                                                            onChange={(e) =>
+                                                                setSelectedDropdowns((prev) => ({
+                                                                    ...prev,
+                                                                    [inputDef.key]: e.target.value,
+                                                                }))
+                                                            }
+                                                            className="w-full rounded-md bg-white border border-black/10 px-3 py-1.5 text-base text-black outline-none focus:ring-1 focus:ring-black/10"
+                                                            title={inputDef.name}
+                                                        >
+                                                            <option value="">Select...</option>
+                                                            {inputDef.dropdownOptions?.map((opt) => (
+                                                                <option key={opt.id} value={opt.value}>
+                                                                    {opt.label} — ₹{opt.rate}
+                                                                </option>
+                                                            ))}
+                                                        </select>
+                                                    )}
+
+                                                    {inputDef.type === 'fixed' && (
+                                                        <span className="text-base text-black font-mono block text-right">
+                                                            ₹{inputDef.fixedValue || '0'}
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </div>
                                         ))}
                                     </div>
-                                )}
 
-                                {/* Total + actions */}
-                                <div className="border-t border-black/5 px-4 py-4 bg-black/[0.01] flex items-center justify-between">
-                                    <div className="flex gap-2">
-                                        <button
-                                            onClick={addUserTempItem}
-                                            className="flex items-center gap-1.5 text-sm text-black/50 hover:text-black border border-black/10 px-3 py-1.5 rounded-xl hover:bg-black/[0.04] transition-colors"
-                                        >
-                                            <Plus className="w-3 h-3" />
-                                            Add Item
-                                        </button>
-                                    </div>
+                                    {result && currentCalc.formulas.length > 0 && (() => {
+                                        const sortedFormulas = [...currentCalc.formulas].sort((a, b) => a.order - b.order);
+                                        const grandTotal = sortedFormulas.find((f) => f.isTotal);
+                                        const regularFormulas = sortedFormulas.filter((f) => !f.isTotal);
 
-                                    <div className="text-right">
-                                        <span className="text-sm text-black/50 block">Grand Total</span>
-                                        <span className="text-xl font-bold text-black font-mono">
-                                            ₹{result?.total || '0'}
-                                        </span>
+                                        return (
+                                            <>
+                                                {/* Regular formula results */}
+                                                {regularFormulas.length > 0 && (
+                                                    <div className="border-t border-black/5">
+                                                        <div className="px-4 py-2 text-sm font-semibold text-black/50 bg-black/[0.02] flex items-center gap-2">
+                                                            <span className="w-1.5 h-1.5 rounded-full bg-black/30" />
+                                                            Calculations
+                                                        </div>
+                                                        {regularFormulas.map((formula) => (
+                                                            <div
+                                                                key={formula.id}
+                                                                className="px-4 py-2.5 flex items-center justify-between border-t border-black/5"
+                                                            >
+                                                                <span className="text-base text-black/70">
+                                                                    {formula.label}
+                                                                </span>
+                                                                <span className="text-base font-mono font-semibold text-black">
+                                                                    ₹{result.formulaResults[formula.key] || '0'}
+                                                                </span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+
+                                                {/* Grand Total — prominent section with profit */}
+                                                {grandTotal && (() => {
+                                                    const baseValue = parseFloat(result.formulaResults[grandTotal.key] || '0');
+                                                    const profitPct = parseFloat(currentCalc.profitPercent || '0') || 0;
+                                                    const profitAmount = baseValue * (profitPct / 100);
+                                                    const finalTotal = baseValue + profitAmount;
+
+                                                    return (
+                                                        <div className="border-t-2 border-emerald-200 bg-gradient-to-r from-emerald-50 to-emerald-50/30">
+                                                            {/* Base total */}
+                                                            <div className="px-5 pt-3 pb-1 flex items-center justify-between">
+                                                                <div className="flex items-center gap-2">
+                                                                    <span className="text-emerald-500 text-lg">🏆</span>
+                                                                    <span className="text-sm font-semibold text-emerald-700">
+                                                                        {grandTotal.label}
+                                                                    </span>
+                                                                </div>
+                                                                <span className="text-sm font-mono font-semibold text-emerald-600">
+                                                                    ₹{baseValue.toFixed(2)}
+                                                                </span>
+                                                            </div>
+
+                                                            {/* Profit line */}
+                                                            {profitPct > 0 && (
+                                                                <div className="px-5 py-1 flex items-center justify-between text-emerald-500">
+                                                                    <span className="text-xs">
+                                                                        + Profit ({profitPct}%)
+                                                                    </span>
+                                                                    <span className="text-xs font-mono font-medium">
+                                                                        ₹{profitAmount.toFixed(2)}
+                                                                    </span>
+                                                                </div>
+                                                            )}
+
+                                                            {/* Final total */}
+                                                            <div className="px-5 pt-1 pb-3 flex items-center justify-between border-t border-emerald-200/50 mt-1">
+                                                                <span className="text-lg font-bold text-emerald-800">
+                                                                    Grand Total
+                                                                </span>
+                                                                <span className="text-xl font-mono font-bold text-emerald-700">
+                                                                    ₹{finalTotal.toFixed(2)}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })()}
+                                            </>
+                                        );
+                                    })()}
+
+                                    {/* User temp items */}
+                                    {userTempItems.length > 0 && (
+                                        <div className="border-t border-black/5">
+                                            <div className="px-4 py-2 text-sm text-black/50 bg-black/[0.01]">
+                                                Additional Items
+                                            </div>
+                                            {userTempItems.map((item) => (
+                                                <div key={item.id} className="px-4 py-2 flex items-center gap-3 border-t border-black/5">
+                                                    <input
+                                                        type="text"
+                                                        value={item.name}
+                                                        onChange={(e) => updateUserTempItem(item.id, { name: e.target.value })}
+                                                        placeholder="Item name..."
+                                                        className="flex-1 rounded bg-white border border-black/10 px-2 py-1 text-sm text-black placeholder:text-black/30 outline-none"
+                                                    />
+                                                    <input
+                                                        type="text"
+                                                        value={item.rate}
+                                                        onChange={(e) => updateUserTempItem(item.id, { rate: e.target.value })}
+                                                        placeholder="₹ Rate"
+                                                        className="w-24 rounded bg-white border border-black/10 px-2 py-1 text-sm text-black font-mono placeholder:text-black/30 outline-none text-right"
+                                                    />
+                                                    <button
+                                                        onClick={() => removeUserTempItem(item.id)}
+                                                        className="p-1 rounded text-black/20 hover:text-red-500 transition-colors"
+                                                        title="Remove item"
+                                                    >
+                                                        <Trash2 className="w-3 h-3" />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {/* Total + actions */}
+                                    <div className="border-t border-black/5 px-4 py-4 bg-black/[0.01] flex items-center justify-between">
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={addUserTempItem}
+                                                className="flex items-center gap-1.5 text-sm text-black/50 hover:text-black border border-black/10 px-3 py-1.5 rounded-xl hover:bg-black/[0.04] transition-colors"
+                                            >
+                                                <Plus className="w-3 h-3" />
+                                                Add Item
+                                            </button>
+                                        </div>
+
+                                        <div className="text-right">
+                                            <span className="text-sm text-black/50 block">Grand Total</span>
+                                            <span className="text-xl font-bold text-black font-mono">
+                                                ₹{(() => {
+                                                    const grandTotalFormula = currentCalc.formulas.find((f) => f.isTotal);
+                                                    if (grandTotalFormula && result) {
+                                                        const base = parseFloat(result.formulaResults[grandTotalFormula.key] || '0');
+                                                        const pct = parseFloat(currentCalc.profitPercent || '0') || 0;
+                                                        return (base + base * (pct / 100)).toFixed(2);
+                                                    }
+                                                    return result?.total || '0';
+                                                })()}
+                                            </span>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
+                            )}
                         </div>
                     )}
                 </div>

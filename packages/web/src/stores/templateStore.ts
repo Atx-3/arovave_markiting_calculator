@@ -6,6 +6,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import Decimal from 'decimal.js';
+import { supabase } from '../lib/supabase';
 import type {
     Category,
     InputDefinition,
@@ -69,9 +70,11 @@ interface AppStore {
 
     // ── Calculators ──
     calculators: Calculator[];
-    createCalculator: (categoryId: string, name: string) => void;
+    createCalculator: (categoryId: string, name: string) => string;
+    updateCalculator: (id: string, updates: Partial<Calculator>) => void;
     deleteCalculator: (id: string) => void;
     getCalculatorForCategory: (categoryId: string) => Calculator | undefined;
+    getCalculatorsForCategory: (categoryId: string) => Calculator[];
 
     // ── Calculator Formulas ──
     addFormula: (calcId: string) => string;
@@ -378,13 +381,12 @@ export const useAppStore = create<AppStore>()(
             calculators: [],
 
             createCalculator(categoryId, name) {
-                const existing = get().calculators.find((c) => c.categoryId === categoryId);
-                if (existing) return;
+                const id = uid();
                 set({
                     calculators: [
                         ...get().calculators,
                         {
-                            id: uid(),
+                            id,
                             name,
                             categoryId,
                             formulas: [],
@@ -393,14 +395,27 @@ export const useAppStore = create<AppStore>()(
                         },
                     ],
                 });
+                return id;
             },
 
             deleteCalculator(id) {
                 set({ calculators: get().calculators.filter((c) => c.id !== id) });
             },
 
+            updateCalculator(id, updates) {
+                set({
+                    calculators: get().calculators.map((c) =>
+                        c.id === id ? { ...c, ...updates } : c,
+                    ),
+                });
+            },
+
             getCalculatorForCategory(categoryId) {
                 return get().calculators.find((c) => c.categoryId === categoryId);
+            },
+
+            getCalculatorsForCategory(categoryId) {
+                return get().calculators.filter((c) => c.categoryId === categoryId);
             },
 
             // ══════════════════════════════════════════════════════════════════
@@ -646,6 +661,108 @@ export const useAppStore = create<AppStore>()(
         },
     ),
 );
+
+
+// ─── Supabase Sync ──────────────────────────────────────────────────
+
+let saveTimeout: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Save current store state to Supabase (debounced).
+ */
+async function saveToSupabase(userId: string) {
+    const state = useAppStore.getState();
+
+    const payload = {
+        user_id: userId,
+        categories: state.categories,
+        input_definitions: state.inputDefinitions,
+        input_groups: state.inputGroups,
+        calculators: state.calculators,
+        updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase
+        .from('calculator_data')
+        .upsert(payload, { onConflict: 'user_id' });
+
+    if (error) {
+        console.error('❌ Supabase save failed:', error.message);
+    } else {
+        console.log('✅ Saved to Supabase');
+    }
+}
+
+/**
+ * Load data from Supabase and replace local state.
+ * If DB is empty but localStorage has data, push it to DB.
+ */
+export async function loadFromSupabase(userId: string) {
+    const { data, error } = await supabase
+        .from('calculator_data')
+        .select('*')
+        .eq('user_id', userId)
+        .single();
+
+    if (error && error.code !== 'PGRST116') {
+        // PGRST116 = "no rows found" — that's okay on first login
+        console.error('❌ Supabase load failed:', error.message);
+        return;
+    }
+
+    if (data) {
+        // DB has data → replace local state
+        console.log('📦 Loaded data from Supabase');
+        // Normalize calculator data — ensure localRates is always an array
+        const normalizedCalcs = (data.calculators || []).map((c: any) => ({
+            ...c,
+            localRates: c.localRates || [],
+            usedInputIds: c.usedInputIds || [],
+            formulas: c.formulas || [],
+        }));
+        useAppStore.setState({
+            categories: data.categories || [],
+            inputDefinitions: data.input_definitions || [],
+            inputGroups: data.input_groups || [],
+            calculators: normalizedCalcs,
+        });
+    } else {
+        // DB is empty — push local data to Supabase (first time)
+        const state = useAppStore.getState();
+        const hasLocalData =
+            state.categories.length > 0 ||
+            state.inputDefinitions.length > 0 ||
+            state.calculators.length > 0;
+
+        if (hasLocalData) {
+            console.log('📤 Pushing local data to Supabase (first sync)');
+            await saveToSupabase(userId);
+        }
+    }
+}
+
+/**
+ * Subscribe to store changes and auto-save to Supabase (debounced 1.5s).
+ * Returns an unsubscribe function.
+ */
+export function startAutoSave(userId: string): () => void {
+    const unsub = useAppStore.subscribe(() => {
+        // Debounce saves to avoid flooding
+        if (saveTimeout) clearTimeout(saveTimeout);
+        saveTimeout = setTimeout(() => {
+            saveToSupabase(userId);
+        }, 1500);
+    });
+
+    return () => {
+        unsub();
+        if (saveTimeout) {
+            clearTimeout(saveTimeout);
+            saveTimeout = null;
+        }
+    };
+}
+
 
 // ─── Token Evaluator ────────────────────────────────────────────────
 

@@ -107,6 +107,7 @@ export interface Calculator {
     formulas: CalculatorFormula[];
     localRates: LocalRate[];
     usedInputIds: string[];
+    profitPercent?: string; // Profit % added on top of grand total
 }
 
 // ─── User Calculation State (Sales Side) ──────────────────────────────
