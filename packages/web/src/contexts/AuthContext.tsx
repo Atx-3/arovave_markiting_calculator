@@ -1,12 +1,12 @@
-import { createContext, useContext, useEffect, useState, useRef, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
-import { loadFromSupabase, startAutoSave } from '../stores/templateStore';
 import type { User, Session } from '@supabase/supabase-js';
 
 interface AuthContextType {
     user: User | null;
     session: Session | null;
     loading: boolean;
+    syncing: boolean;
     signInWithGoogle: () => Promise<void>;
     signOut: () => Promise<void>;
 }
@@ -23,50 +23,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [user, setUser] = useState<User | null>(null);
     const [session, setSession] = useState<Session | null>(null);
     const [loading, setLoading] = useState(true);
-    const autoSaveUnsub = useRef<(() => void) | null>(null);
+    const [syncing] = useState(false);
 
     useEffect(() => {
-        // Get initial session
+        // Get initial session (optional — no auth required for sync)
         supabase.auth.getSession().then(({ data: { session: s } }) => {
             setSession(s);
             setUser(s?.user ?? null);
             setLoading(false);
-
-            // Sync data on initial load if user exists
-            if (s?.user) {
-                loadFromSupabase(s.user.id).then(() => {
-                    autoSaveUnsub.current = startAutoSave(s.user.id);
-                });
-            }
         });
 
-        // Listen for auth changes
+        // Listen for auth changes (optional)
         const { data: { subscription } } = supabase.auth.onAuthStateChange(
             (_event, s) => {
                 setSession(s);
                 setUser(s?.user ?? null);
                 setLoading(false);
-
-                // On sign-in: load data + start auto-save
-                if (s?.user) {
-                    loadFromSupabase(s.user.id).then(() => {
-                        // Clean up previous subscription
-                        if (autoSaveUnsub.current) autoSaveUnsub.current();
-                        autoSaveUnsub.current = startAutoSave(s.user.id);
-                    });
-                } else {
-                    // On sign-out: stop auto-save
-                    if (autoSaveUnsub.current) {
-                        autoSaveUnsub.current();
-                        autoSaveUnsub.current = null;
-                    }
-                }
             },
         );
 
         return () => {
             subscription.unsubscribe();
-            if (autoSaveUnsub.current) autoSaveUnsub.current();
         };
     }, []);
 
@@ -92,7 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     return (
-        <AuthContext.Provider value={{ user, session, loading, signInWithGoogle, signOut }}>
+        <AuthContext.Provider value={{ user, session, loading, syncing, signInWithGoogle, signOut }}>
             {children}
         </AuthContext.Provider>
     );

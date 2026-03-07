@@ -1,41 +1,16 @@
 -- ═══════════════════════════════════════════════════════════════════════
--- SUPABASE SQL MIGRATION — Run in Supabase SQL Editor
+-- SUPABASE SQL MIGRATION — No Auth, Global Sync
+-- Run this in Supabase SQL Editor (Dashboard → SQL Editor → New Query)
 -- ═══════════════════════════════════════════════════════════════════════
 
--- 1. Profiles table (auto-created for each user on signup)
-CREATE TABLE IF NOT EXISTS profiles (
-    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-    email TEXT,
-    full_name TEXT,
-    avatar_url TEXT,
-    role TEXT DEFAULT 'viewer',
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
+-- Drop old tables if they exist (from previous auth-based setup)
+DROP TABLE IF EXISTS calculator_data CASCADE;
+DROP TABLE IF EXISTS profiles CASCADE;
+DROP FUNCTION IF EXISTS handle_new_user() CASCADE;
 
--- 2. Auto-create profile on new user signup
-CREATE OR REPLACE FUNCTION handle_new_user()
-RETURNS TRIGGER AS $$
-BEGIN
-    INSERT INTO profiles (id, email, full_name, avatar_url)
-    VALUES (
-        NEW.id,
-        NEW.email,
-        NEW.raw_user_meta_data->>'full_name',
-        NEW.raw_user_meta_data->>'avatar_url'
-    );
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
-DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
-CREATE TRIGGER on_auth_user_created
-    AFTER INSERT ON auth.users
-    FOR EACH ROW EXECUTE FUNCTION handle_new_user();
-
--- 3. Calculator data table (one row per user, stores entire state as JSON)
+-- 1. Global calculator data table (single-row, shared across all devices)
 CREATE TABLE IF NOT EXISTS calculator_data (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE UNIQUE,
+    id TEXT PRIMARY KEY DEFAULT 'global',
     categories JSONB DEFAULT '[]',
     input_definitions JSONB DEFAULT '[]',
     input_groups JSONB DEFAULT '[]',
@@ -43,29 +18,28 @@ CREATE TABLE IF NOT EXISTS calculator_data (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 4. Row Level Security
-ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+-- 2. Insert the initial global row
+INSERT INTO calculator_data (id) VALUES ('global')
+ON CONFLICT (id) DO NOTHING;
+
+-- 3. Enable RLS but allow anonymous access (anon key can read/write)
 ALTER TABLE calculator_data ENABLE ROW LEVEL SECURITY;
 
--- Profiles: view + update own
-CREATE POLICY "Users can view own profile" ON profiles
-    FOR SELECT USING (auth.uid() = id);
+-- Allow anyone with the anon key to SELECT
+CREATE POLICY "Allow public read" ON calculator_data
+    FOR SELECT USING (true);
 
-CREATE POLICY "Users can update own profile" ON profiles
-    FOR UPDATE USING (auth.uid() = id);
+-- Allow anyone with the anon key to INSERT
+CREATE POLICY "Allow public insert" ON calculator_data
+    FOR INSERT WITH CHECK (true);
 
--- Calculator data: full CRUD on own data
-CREATE POLICY "Users can view own data" ON calculator_data
-    FOR SELECT USING (auth.uid() = user_id);
+-- Allow anyone with the anon key to UPDATE
+CREATE POLICY "Allow public update" ON calculator_data
+    FOR UPDATE USING (true);
 
-CREATE POLICY "Users can insert own data" ON calculator_data
-    FOR INSERT WITH CHECK (auth.uid() = user_id);
+-- Allow anyone with the anon key to DELETE
+CREATE POLICY "Allow public delete" ON calculator_data
+    FOR DELETE USING (true);
 
-CREATE POLICY "Users can update own data" ON calculator_data
-    FOR UPDATE USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can delete own data" ON calculator_data
-    FOR DELETE USING (auth.uid() = user_id);
-
--- 5. Index for fast lookup
-CREATE INDEX IF NOT EXISTS idx_calculator_data_user_id ON calculator_data(user_id);
+-- 4. Enable Realtime on this table for cross-device sync
+ALTER PUBLICATION supabase_realtime ADD TABLE calculator_data;

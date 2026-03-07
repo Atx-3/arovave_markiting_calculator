@@ -663,18 +663,25 @@ export const useAppStore = create<AppStore>()(
 );
 
 
-// ─── Supabase Sync ──────────────────────────────────────────────────
+// ─── Supabase Sync (No Auth — Global Data) ─────────────────────────
 
 let saveTimeout: ReturnType<typeof setTimeout> | null = null;
+let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
+let isSyncingFromRemote = false; // prevent echo saves
+
+const GLOBAL_ID = 'global';
 
 /**
  * Save current store state to Supabase (debounced).
+ * Uses a single global row — no user_id needed.
  */
-async function saveToSupabase(userId: string) {
+async function saveToSupabase() {
+    if (isSyncingFromRemote) return; // skip save if we're applying remote data
+
     const state = useAppStore.getState();
 
     const payload = {
-        user_id: userId,
+        id: GLOBAL_ID,
         categories: state.categories,
         input_definitions: state.inputDefinitions,
         input_groups: state.inputGroups,
@@ -684,7 +691,7 @@ async function saveToSupabase(userId: string) {
 
     const { error } = await supabase
         .from('calculator_data')
-        .upsert(payload, { onConflict: 'user_id' });
+        .upsert(payload, { onConflict: 'id' });
 
     if (error) {
         console.error('❌ Supabase save failed:', error.message);
@@ -697,35 +704,21 @@ async function saveToSupabase(userId: string) {
  * Load data from Supabase and replace local state.
  * If DB is empty but localStorage has data, push it to DB.
  */
-export async function loadFromSupabase(userId: string) {
+export async function loadFromSupabase() {
     const { data, error } = await supabase
         .from('calculator_data')
         .select('*')
-        .eq('user_id', userId)
+        .eq('id', GLOBAL_ID)
         .single();
 
     if (error && error.code !== 'PGRST116') {
-        // PGRST116 = "no rows found" — that's okay on first login
         console.error('❌ Supabase load failed:', error.message);
         return;
     }
 
     if (data) {
-        // DB has data → replace local state
         console.log('📦 Loaded data from Supabase');
-        // Normalize calculator data — ensure localRates is always an array
-        const normalizedCalcs = (data.calculators || []).map((c: any) => ({
-            ...c,
-            localRates: c.localRates || [],
-            usedInputIds: c.usedInputIds || [],
-            formulas: c.formulas || [],
-        }));
-        useAppStore.setState({
-            categories: data.categories || [],
-            inputDefinitions: data.input_definitions || [],
-            inputGroups: data.input_groups || [],
-            calculators: normalizedCalcs,
-        });
+        applyRemoteData(data);
     } else {
         // DB is empty — push local data to Supabase (first time)
         const state = useAppStore.getState();
@@ -736,21 +729,47 @@ export async function loadFromSupabase(userId: string) {
 
         if (hasLocalData) {
             console.log('📤 Pushing local data to Supabase (first sync)');
-            await saveToSupabase(userId);
+            await saveToSupabase();
         }
     }
+}
+
+/**
+ * Apply remote data to the local store (used by load + realtime).
+ */
+function applyRemoteData(data: any) {
+    isSyncingFromRemote = true;
+
+    const normalizedCalcs = (data.calculators || []).map((c: any) => ({
+        ...c,
+        localRates: c.localRates || [],
+        usedInputIds: c.usedInputIds || [],
+        formulas: c.formulas || [],
+    }));
+
+    useAppStore.setState({
+        categories: data.categories || [],
+        inputDefinitions: data.input_definitions || [],
+        inputGroups: data.input_groups || [],
+        calculators: normalizedCalcs,
+    });
+
+    // Allow saves again after a short delay
+    setTimeout(() => {
+        isSyncingFromRemote = false;
+    }, 100);
 }
 
 /**
  * Subscribe to store changes and auto-save to Supabase (debounced 1.5s).
  * Returns an unsubscribe function.
  */
-export function startAutoSave(userId: string): () => void {
+export function startAutoSave(): () => void {
     const unsub = useAppStore.subscribe(() => {
-        // Debounce saves to avoid flooding
+        if (isSyncingFromRemote) return; // don't save remote changes back
         if (saveTimeout) clearTimeout(saveTimeout);
         saveTimeout = setTimeout(() => {
-            saveToSupabase(userId);
+            saveToSupabase();
         }, 1500);
     });
 
@@ -762,6 +781,78 @@ export function startAutoSave(userId: string): () => void {
         }
     };
 }
+
+/**
+ * Start Supabase Realtime subscription for cross-device sync.
+ * When another device saves, this device gets the update instantly.
+ */
+export function startRealtimeSync(): () => void {
+    // Clean up any existing subscription
+    if (realtimeChannel) {
+        supabase.removeChannel(realtimeChannel);
+    }
+
+    realtimeChannel = supabase
+        .channel('calculator-sync')
+        .on(
+            'postgres_changes',
+            {
+                event: 'UPDATE',
+                schema: 'public',
+                table: 'calculator_data',
+                filter: `id=eq.${GLOBAL_ID}`,
+            },
+            (payload) => {
+                console.log('🔄 Realtime update received from another device');
+                if (payload.new) {
+                    applyRemoteData(payload.new);
+                }
+            },
+        )
+        .subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+                console.log('📡 Realtime sync active — changes will sync across devices');
+            }
+        });
+
+    return () => {
+        if (realtimeChannel) {
+            supabase.removeChannel(realtimeChannel);
+            realtimeChannel = null;
+        }
+    };
+}
+
+/**
+ * Initialize everything: load data, start auto-save, start realtime sync.
+ * Call this once when the app starts.
+ */
+let initialized = false;
+let cleanupFns: (() => void)[] = [];
+
+export async function initSupabaseSync() {
+    if (initialized) return;
+    initialized = true;
+
+    console.log('🚀 Initializing Supabase sync...');
+
+    // 1. Load remote data
+    await loadFromSupabase();
+
+    // 2. Start auto-save on local changes
+    cleanupFns.push(startAutoSave());
+
+    // 3. Start realtime sync for cross-device updates
+    cleanupFns.push(startRealtimeSync());
+
+    console.log('✅ Supabase sync initialized — all devices will stay in sync');
+}
+
+// Auto-initialize when the module loads (after a short delay to let the store hydrate from localStorage first)
+setTimeout(() => {
+    initSupabaseSync();
+}, 500);
+
 
 
 // ─── Token Evaluator ────────────────────────────────────────────────
