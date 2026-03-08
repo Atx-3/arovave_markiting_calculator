@@ -3,8 +3,8 @@
  * Handles syncing categories, input_definitions, input_groups, and calculators
  * to/from Supabase with Realtime for cross-device updates.
  *
- * Uses UPSERT + selective delete to avoid the delete-then-insert race condition
- * that caused the data wipeout loop.
+ * Uses UPSERT + selective delete to avoid the delete-then-insert race condition.
+ * Uses isSavingToRemote flag to prevent Realtime self-overwrite.
  */
 
 import { supabase } from '../lib/supabase';
@@ -24,6 +24,7 @@ let storeRef: any = null;
 let saveTimeout: ReturnType<typeof setTimeout> | null = null;
 let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
 let isSyncingFromRemote = false;
+let isSavingToRemote = false;  // Blocks Realtime reloads during our own saves
 
 // ── Converters: Store ↔ DB ──
 
@@ -116,9 +117,13 @@ async function syncTable(table: string, rows: any[]) {
 /**
  * Save ALL store data to Supabase (4 separate tables).
  * Uses upsert to avoid the delete-then-insert race condition.
+ * Sets isSavingToRemote to block Realtime self-overwrite.
  */
 async function saveToSupabase() {
     if (isSyncingFromRemote || !storeRef) return;
+
+    // Block Realtime reloads during our own save
+    isSavingToRemote = true;
 
     const state = storeRef.getState();
 
@@ -134,6 +139,10 @@ async function saveToSupabase() {
     } else {
         console.error('❌ Some tables failed to sync');
     }
+
+    // Keep blocking Realtime for 3 seconds after save completes,
+    // so our own Realtime events don't trigger self-reload
+    setTimeout(() => { isSavingToRemote = false; }, 3000);
 }
 
 /**
@@ -210,11 +219,12 @@ function debouncedReloadTable(table: string) {
     if (reloadDebounceTimers[table]) clearTimeout(reloadDebounceTimers[table]);
     reloadDebounceTimers[table] = setTimeout(() => {
         reloadTable(table);
-    }, 800);
+    }, 1000);
 }
 
 /**
  * Listen to Realtime changes on ALL 4 tables for cross-device sync.
+ * Ignores events when isSavingToRemote is true (our own saves).
  */
 function startRealtimeSync(): () => void {
     if (realtimeChannel) supabase.removeChannel(realtimeChannel);
@@ -222,16 +232,16 @@ function startRealtimeSync(): () => void {
     realtimeChannel = supabase
         .channel('calc-sync-v2')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, () => {
-            if (!isSyncingFromRemote) debouncedReloadTable('categories');
+            if (!isSyncingFromRemote && !isSavingToRemote) debouncedReloadTable('categories');
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'input_definitions' }, () => {
-            if (!isSyncingFromRemote) debouncedReloadTable('input_definitions');
+            if (!isSyncingFromRemote && !isSavingToRemote) debouncedReloadTable('input_definitions');
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'input_groups' }, () => {
-            if (!isSyncingFromRemote) debouncedReloadTable('input_groups');
+            if (!isSyncingFromRemote && !isSavingToRemote) debouncedReloadTable('input_groups');
         })
         .on('postgres_changes', { event: '*', schema: 'public', table: 'calculators' }, () => {
-            if (!isSyncingFromRemote) debouncedReloadTable('calculators');
+            if (!isSyncingFromRemote && !isSavingToRemote) debouncedReloadTable('calculators');
         })
         .subscribe((status: string) => {
             if (status === 'SUBSCRIBED') {
@@ -246,7 +256,7 @@ function startRealtimeSync(): () => void {
 
 // Reload a single table from Supabase
 async function reloadTable(table: string) {
-    if (!storeRef) return;
+    if (!storeRef || isSavingToRemote) return;
     isSyncingFromRemote = true;
     const { data, error } = await supabase.from(table).select('*').order(table === 'calculators' ? 'name' : 'sort_order');
     if (error) { console.error(`❌ Reload ${table} failed:`, error.message); isSyncingFromRemote = false; return; }
