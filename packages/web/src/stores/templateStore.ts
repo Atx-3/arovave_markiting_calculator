@@ -663,64 +663,145 @@ export const useAppStore = create<AppStore>()(
 );
 
 
-// ─── Supabase Sync (No Auth — Global Data) ─────────────────────────
+// ─── Supabase Sync — Separate Tables ────────────────────────────────
 
 let saveTimeout: ReturnType<typeof setTimeout> | null = null;
 let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
-let isSyncingFromRemote = false; // prevent echo saves
+let isSyncingFromRemote = false;
 
-const GLOBAL_ID = 'global';
+// ── Helpers: Convert between store format and DB format ──
+
+function categoryToRow(c: Category) {
+    return { id: c.id, name: c.name, parent_id: c.parentId, sort_order: c.order, updated_at: new Date().toISOString() };
+}
+function rowToCategory(r: any): Category {
+    return { id: r.id, name: r.name, parentId: r.parent_id ?? null, order: r.sort_order ?? 0 };
+}
+
+function inputDefToRow(d: InputDefinition) {
+    return {
+        id: d.id, name: d.name, key: d.key, type: d.type, rate: d.rate,
+        fixed_value: d.fixedValue ?? null,
+        dropdown_options: d.dropdownOptions ?? [],
+        ref_tree: d.refTree ?? null,
+        reference_items: d.referenceItems ?? [],
+        sort_order: d.order, group_id: d.groupId ?? null,
+        is_required: d.isRequired ?? false,
+        updated_at: new Date().toISOString(),
+    };
+}
+function rowToInputDef(r: any): InputDefinition {
+    return {
+        id: r.id, name: r.name, key: r.key, type: r.type, rate: r.rate ?? '0',
+        fixedValue: r.fixed_value ?? undefined,
+        dropdownOptions: r.dropdown_options ?? [],
+        refTree: r.ref_tree ?? undefined,
+        referenceItems: r.reference_items ?? [],
+        order: r.sort_order ?? 0, groupId: r.group_id ?? undefined,
+        isRequired: r.is_required ?? false,
+    };
+}
+
+function inputGroupToRow(g: InputGroup) {
+    return { id: g.id, name: g.name, sort_order: g.order, updated_at: new Date().toISOString() };
+}
+function rowToInputGroup(r: any): InputGroup {
+    return { id: r.id, name: r.name, order: r.sort_order ?? 0 };
+}
+
+function calculatorToRow(c: Calculator) {
+    return {
+        id: c.id, name: c.name, category_id: c.categoryId,
+        formulas: c.formulas ?? [],
+        local_rates: c.localRates ?? [],
+        used_input_ids: c.usedInputIds ?? [],
+        profit_percent: c.profitPercent ?? '0',
+        updated_at: new Date().toISOString(),
+    };
+}
+function rowToCalculator(r: any): Calculator {
+    return {
+        id: r.id, name: r.name, categoryId: r.category_id,
+        formulas: r.formulas ?? [],
+        localRates: r.local_rates ?? [],
+        usedInputIds: r.used_input_ids ?? [],
+        profitPercent: r.profit_percent ?? '0',
+    };
+}
+
+// ── Replace all rows in a table with the current data ──
+
+async function replaceAllRows(table: string, rows: any[]) {
+    // Delete all existing rows
+    const { error: delError } = await supabase.from(table).delete().neq('id', '___never_match___');
+    if (delError) {
+        console.error(`❌ Failed to clear ${table}:`, delError.message);
+        return false;
+    }
+    // Insert new rows (if any)
+    if (rows.length > 0) {
+        const { error: insError } = await supabase.from(table).insert(rows);
+        if (insError) {
+            console.error(`❌ Failed to insert into ${table}:`, insError.message);
+            return false;
+        }
+    }
+    return true;
+}
 
 /**
- * Save current store state to Supabase (debounced).
- * Uses a single global row — no user_id needed.
+ * Save ALL store data to Supabase (4 separate tables).
  */
 async function saveToSupabase() {
-    if (isSyncingFromRemote) return; // skip save if we're applying remote data
+    if (isSyncingFromRemote) return;
 
     const state = useAppStore.getState();
 
-    const payload = {
-        id: GLOBAL_ID,
-        categories: state.categories,
-        input_definitions: state.inputDefinitions,
-        input_groups: state.inputGroups,
-        calculators: state.calculators,
-        updated_at: new Date().toISOString(),
-    };
+    const results = await Promise.all([
+        replaceAllRows('categories', state.categories.map(categoryToRow)),
+        replaceAllRows('input_definitions', state.inputDefinitions.map(inputDefToRow)),
+        replaceAllRows('input_groups', state.inputGroups.map(inputGroupToRow)),
+        replaceAllRows('calculators', state.calculators.map(calculatorToRow)),
+    ]);
 
-    const { error } = await supabase
-        .from('calculator_data')
-        .upsert(payload, { onConflict: 'id' });
-
-    if (error) {
-        console.error('❌ Supabase save failed:', error.message);
+    if (results.every(Boolean)) {
+        console.log('✅ All data saved to Supabase (4 tables)');
     } else {
-        console.log('✅ Saved to Supabase');
+        console.error('❌ Some tables failed to sync');
     }
 }
 
 /**
- * Load data from Supabase and replace local state.
- * If DB is empty but localStorage has data, push it to DB.
+ * Load ALL data from Supabase (4 separate tables) into local store.
  */
 export async function loadFromSupabase() {
-    const { data, error } = await supabase
-        .from('calculator_data')
-        .select('*')
-        .eq('id', GLOBAL_ID)
-        .single();
+    const [catRes, inputRes, groupRes, calcRes] = await Promise.all([
+        supabase.from('categories').select('*').order('sort_order'),
+        supabase.from('input_definitions').select('*').order('sort_order'),
+        supabase.from('input_groups').select('*').order('sort_order'),
+        supabase.from('calculators').select('*'),
+    ]);
 
-    if (error && error.code !== 'PGRST116') {
-        console.error('❌ Supabase load failed:', error.message);
-        return;
-    }
+    // Check if DB has any data at all
+    const hasRemoteData =
+        (catRes.data && catRes.data.length > 0) ||
+        (inputRes.data && inputRes.data.length > 0) ||
+        (calcRes.data && calcRes.data.length > 0);
 
-    if (data) {
-        console.log('📦 Loaded data from Supabase');
-        applyRemoteData(data);
+    if (hasRemoteData) {
+        console.log('📦 Loaded data from Supabase tables');
+        isSyncingFromRemote = true;
+
+        useAppStore.setState({
+            categories: (catRes.data || []).map(rowToCategory),
+            inputDefinitions: (inputRes.data || []).map(rowToInputDef),
+            inputGroups: (groupRes.data || []).map(rowToInputGroup),
+            calculators: (calcRes.data || []).map(rowToCalculator),
+        });
+
+        setTimeout(() => { isSyncingFromRemote = false; }, 100);
     } else {
-        // DB is empty — push local data to Supabase (first time)
+        // DB is empty — push local data to Supabase
         const state = useAppStore.getState();
         const hasLocalData =
             state.categories.length > 0 ||
@@ -732,126 +813,107 @@ export async function loadFromSupabase() {
             await saveToSupabase();
         }
     }
-}
 
-/**
- * Apply remote data to the local store (used by load + realtime).
- */
-function applyRemoteData(data: any) {
-    isSyncingFromRemote = true;
-
-    const normalizedCalcs = (data.calculators || []).map((c: any) => ({
-        ...c,
-        localRates: c.localRates || [],
-        usedInputIds: c.usedInputIds || [],
-        formulas: c.formulas || [],
-    }));
-
-    useAppStore.setState({
-        categories: data.categories || [],
-        inputDefinitions: data.input_definitions || [],
-        inputGroups: data.input_groups || [],
-        calculators: normalizedCalcs,
+    // Log any errors
+    [catRes, inputRes, groupRes, calcRes].forEach((res, i) => {
+        if (res.error) console.error(`❌ Table ${i} load error:`, res.error.message);
     });
-
-    // Allow saves again after a short delay
-    setTimeout(() => {
-        isSyncingFromRemote = false;
-    }, 100);
 }
 
 /**
- * Subscribe to store changes and auto-save to Supabase (debounced 1.5s).
- * Returns an unsubscribe function.
+ * Auto-save on store changes (debounced 1.5s).
  */
 export function startAutoSave(): () => void {
     const unsub = useAppStore.subscribe(() => {
-        if (isSyncingFromRemote) return; // don't save remote changes back
+        if (isSyncingFromRemote) return;
         if (saveTimeout) clearTimeout(saveTimeout);
-        saveTimeout = setTimeout(() => {
-            saveToSupabase();
-        }, 1500);
+        saveTimeout = setTimeout(() => { saveToSupabase(); }, 1500);
     });
 
     return () => {
         unsub();
-        if (saveTimeout) {
-            clearTimeout(saveTimeout);
-            saveTimeout = null;
-        }
+        if (saveTimeout) { clearTimeout(saveTimeout); saveTimeout = null; }
     };
 }
 
 /**
- * Start Supabase Realtime subscription for cross-device sync.
- * When another device saves, this device gets the update instantly.
+ * Listen to Realtime changes on ALL 4 tables for cross-device sync.
  */
 export function startRealtimeSync(): () => void {
-    // Clean up any existing subscription
-    if (realtimeChannel) {
-        supabase.removeChannel(realtimeChannel);
-    }
+    if (realtimeChannel) supabase.removeChannel(realtimeChannel);
 
     realtimeChannel = supabase
-        .channel('calculator-sync')
-        .on(
-            'postgres_changes',
-            {
-                event: 'UPDATE',
-                schema: 'public',
-                table: 'calculator_data',
-                filter: `id=eq.${GLOBAL_ID}`,
-            },
-            (payload) => {
-                console.log('🔄 Realtime update received from another device');
-                if (payload.new) {
-                    applyRemoteData(payload.new);
-                }
-            },
-        )
+        .channel('calculator-multi-table-sync')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, () => {
+            console.log('🔄 categories changed on another device');
+            reloadTable('categories');
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'input_definitions' }, () => {
+            console.log('🔄 input_definitions changed on another device');
+            reloadTable('input_definitions');
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'input_groups' }, () => {
+            console.log('🔄 input_groups changed on another device');
+            reloadTable('input_groups');
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'calculators' }, () => {
+            console.log('🔄 calculators changed on another device');
+            reloadTable('calculators');
+        })
         .subscribe((status) => {
             if (status === 'SUBSCRIBED') {
-                console.log('📡 Realtime sync active — changes will sync across devices');
+                console.log('📡 Realtime sync active on all 4 tables');
             }
         });
 
     return () => {
-        if (realtimeChannel) {
-            supabase.removeChannel(realtimeChannel);
-            realtimeChannel = null;
-        }
+        if (realtimeChannel) { supabase.removeChannel(realtimeChannel); realtimeChannel = null; }
     };
 }
 
+// Reload a single table from Supabase
+async function reloadTable(table: string) {
+    isSyncingFromRemote = true;
+    const { data, error } = await supabase.from(table).select('*').order(table === 'calculators' ? 'name' : 'sort_order');
+    if (error) { console.error(`❌ Reload ${table} failed:`, error.message); isSyncingFromRemote = false; return; }
+
+    switch (table) {
+        case 'categories':
+            useAppStore.setState({ categories: (data || []).map(rowToCategory) });
+            break;
+        case 'input_definitions':
+            useAppStore.setState({ inputDefinitions: (data || []).map(rowToInputDef) });
+            break;
+        case 'input_groups':
+            useAppStore.setState({ inputGroups: (data || []).map(rowToInputGroup) });
+            break;
+        case 'calculators':
+            useAppStore.setState({ calculators: (data || []).map(rowToCalculator) });
+            break;
+    }
+
+    setTimeout(() => { isSyncingFromRemote = false; }, 100);
+}
+
 /**
- * Initialize everything: load data, start auto-save, start realtime sync.
- * Call this once when the app starts.
+ * Initialize: load data, start auto-save, start realtime sync.
  */
 let initialized = false;
-let cleanupFns: (() => void)[] = [];
+const cleanupFns: (() => void)[] = [];
 
 export async function initSupabaseSync() {
     if (initialized) return;
     initialized = true;
 
-    console.log('🚀 Initializing Supabase sync...');
-
-    // 1. Load remote data
+    console.log('🚀 Initializing Supabase sync (4 tables)...');
     await loadFromSupabase();
-
-    // 2. Start auto-save on local changes
     cleanupFns.push(startAutoSave());
-
-    // 3. Start realtime sync for cross-device updates
     cleanupFns.push(startRealtimeSync());
-
     console.log('✅ Supabase sync initialized — all devices will stay in sync');
 }
 
-// Auto-initialize when the module loads (after a short delay to let the store hydrate from localStorage first)
-setTimeout(() => {
-    initSupabaseSync();
-}, 500);
+// Auto-initialize on module load
+setTimeout(() => { initSupabaseSync(); }, 500);
 
 
 
