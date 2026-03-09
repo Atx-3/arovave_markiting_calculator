@@ -277,8 +277,12 @@ function InputCard({
                         <label className="text-[10px] text-black/30 block text-right mb-0.5">Value</label>
                         <input
                             type="text"
+                            inputMode="decimal"
                             value={input.fixedValue || ''}
-                            onChange={(e) => onUpdate({ fixedValue: e.target.value })}
+                            onChange={(e) => {
+                                const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+                                onUpdate({ fixedValue: v });
+                            }}
                             className="w-20 text-right text-sm font-mono font-semibold text-black bg-black/[0.03] rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-black/10 border border-black/5"
                             placeholder="0"
                         />
@@ -368,10 +372,12 @@ function InputCard({
                                     />
                                     <input
                                         type="text"
+                                        inputMode="decimal"
                                         value={opt.rate}
-                                        onChange={(e) =>
-                                            onUpdateDropdownOption(opt.id, { rate: e.target.value })
-                                        }
+                                        onChange={(e) => {
+                                            const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+                                            onUpdateDropdownOption(opt.id, { rate: v });
+                                        }}
                                         placeholder="Rate"
                                         className="w-20 text-sm text-black bg-transparent outline-none placeholder:text-black/25 font-mono text-right"
                                     />
