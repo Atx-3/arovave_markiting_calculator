@@ -368,15 +368,6 @@ function InputCard({
                                     />
                                     <input
                                         type="text"
-                                        value={opt.value}
-                                        onChange={(e) =>
-                                            onUpdateDropdownOption(opt.id, { value: e.target.value })
-                                        }
-                                        placeholder="Value..."
-                                        className="w-24 text-sm text-black/60 bg-transparent outline-none placeholder:text-black/25 font-mono"
-                                    />
-                                    <input
-                                        type="text"
                                         value={opt.rate}
                                         onChange={(e) =>
                                             onUpdateDropdownOption(opt.id, { rate: e.target.value })

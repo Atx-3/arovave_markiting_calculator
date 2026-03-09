@@ -308,9 +308,15 @@ export const useAppStore = create<AppStore>()(
                         if (i.id !== inputId) return i;
                         return {
                             ...i,
-                            dropdownOptions: (i.dropdownOptions || []).map((o) =>
-                                o.id === optionId ? { ...o, ...updates } : o,
-                            ),
+                            dropdownOptions: (i.dropdownOptions || []).map((o) => {
+                                if (o.id !== optionId) return o;
+                                const merged = { ...o, ...updates };
+                                // Auto-generate value (key) from label
+                                if (updates.label !== undefined) {
+                                    merged.value = labelToKey(updates.label);
+                                }
+                                return merged;
+                            }),
                         };
                     }),
                 });
