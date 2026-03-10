@@ -5,11 +5,16 @@ import {
     FolderOpen,
     ArrowLeft,
     Plus,
-    Trash2,
     X,
+    ChevronDown,
+    ChevronUp,
 } from 'lucide-react';
 import { useAppStore } from '../../stores/templateStore';
-import type { UserTempItem, RefTreeNode } from '../../types/calculator';
+import type { RefTreeNode, Calculator as CalcType, InputDefinition } from '../../types/calculator';
+
+// ═══════════════════════════════════════════════════════════════════════
+// SALES CALCULATOR — Multi-Charge Stackable System
+// ═══════════════════════════════════════════════════════════════════════
 
 export function SalesCalculator() {
     const store = useAppStore();
@@ -23,79 +28,120 @@ export function SalesCalculator() {
     } = store;
 
     const [currentCategoryId, setCurrentCategoryId] = useState<string | null>(null);
-    const [selectedCalcId, setSelectedCalcId] = useState<string | null>(null);
-    const [inputs, setInputs] = useState<Record<string, string>>({});
-    const [selectedDropdowns, setSelectedDropdowns] = useState<Record<string, string>>({});
-    const [userTempItems, setUserTempItems] = useState<UserTempItem[]>([]);
-    const [showTempList, setShowTempList] = useState(false);
+    // Multi-charge: track which calculators are active (first always active)
+    const [activeCalcIds, setActiveCalcIds] = useState<string[]>([]);
+    // Per-calculator input states
+    const [inputsByCalc, setInputsByCalc] = useState<Record<string, Record<string, string>>>({});
+    const [dropdownsByCalc, setDropdownsByCalc] = useState<Record<string, Record<string, string>>>({});
+    // Per-calculator collapse state
+    const [collapsedCalcs, setCollapsedCalcs] = useState<Record<string, boolean>>({});
+    // Reference sidebar
     const [focusedInputId, setFocusedInputId] = useState<string | null>(null);
+    const [focusedCalcId, setFocusedCalcId] = useState<string | null>(null);
     const [refTreePath, setRefTreePath] = useState<string[]>([]);
+    const [showAddCharge, setShowAddCharge] = useState(false);
 
     // Navigation
     const children = getCategoryChildren(currentCategoryId);
     const breadcrumb = currentCategoryId ? getCategoryBreadcrumb(currentCategoryId) : [];
 
-    // Get ALL calculators for this category (not just first)
+    // All calculators in this category
     const categoryCalcs = currentCategoryId ? getCalculatorsForCategory(currentCategoryId) : [];
-    const currentCalc = selectedCalcId
-        ? categoryCalcs.find((c) => c.id === selectedCalcId)
-        : categoryCalcs.length > 0
-            ? categoryCalcs[0]
-            : undefined;
-
-    // Get inputs used by this calculator
-    const usedInputDefs = useMemo(() => {
-        if (!currentCalc) return [];
-        return inputDefinitions
-            .filter((i) => currentCalc.usedInputIds.includes(i.id))
-            .sort((a, b) => a.order - b.order);
-    }, [currentCalc, inputDefinitions]);
-
-    // Calculation
-    const result = useMemo(() => {
-        if (!currentCalc) return null;
-        return calculateResult(currentCalc, inputs, selectedDropdowns, userTempItems);
-    }, [currentCalc, inputs, selectedDropdowns, userTempItems, calculateResult]);
+    const activeCalcs = activeCalcIds
+        .map((id) => categoryCalcs.find((c) => c.id === id))
+        .filter(Boolean) as CalcType[];
+    const availableToAdd = categoryCalcs.filter((c) => !activeCalcIds.includes(c.id));
 
     const navigateTo = useCallback((id: string | null) => {
         setCurrentCategoryId(id);
-        setSelectedCalcId(null);
-        setInputs({});
-        setSelectedDropdowns({});
-        setUserTempItems([]);
-        setShowTempList(false);
+        setActiveCalcIds([]);
+        setInputsByCalc({});
+        setDropdownsByCalc({});
+        setCollapsedCalcs({});
         setFocusedInputId(null);
+        setFocusedCalcId(null);
         setRefTreePath([]);
+        setShowAddCharge(false);
+
+        // Auto-activate first calculator
+        if (id) {
+            const calcs = getCalculatorsForCategory(id);
+            if (calcs.length > 0) {
+                setActiveCalcIds([calcs[0].id]);
+            }
+        }
+    }, [getCalculatorsForCategory]);
+
+    const addCharge = useCallback((calcId: string) => {
+        setActiveCalcIds((prev) => [...prev, calcId]);
+        setShowAddCharge(false);
     }, []);
 
-    const switchCalculator = useCallback((calcId: string) => {
-        setSelectedCalcId(calcId);
-        setInputs({});
-        setSelectedDropdowns({});
-        setUserTempItems([]);
-        setShowTempList(false);
-        setFocusedInputId(null);
-        setRefTreePath([]);
+    const removeCharge = useCallback((calcId: string) => {
+        setActiveCalcIds((prev) => prev.filter((id) => id !== calcId));
+        setInputsByCalc((prev) => { const next = { ...prev }; delete next[calcId]; return next; });
+        setDropdownsByCalc((prev) => { const next = { ...prev }; delete next[calcId]; return next; });
+        setCollapsedCalcs((prev) => { const next = { ...prev }; delete next[calcId]; return next; });
     }, []);
 
-    const addUserTempItem = () => {
-        setUserTempItems((prev) => [
+    const toggleCollapse = useCallback((calcId: string) => {
+        setCollapsedCalcs((prev) => ({ ...prev, [calcId]: !prev[calcId] }));
+    }, []);
+
+    const setCalcInput = useCallback((calcId: string, key: string, value: string) => {
+        setInputsByCalc((prev) => ({
             ...prev,
-            { id: crypto.randomUUID(), name: '', rate: '' },
-        ]);
-    };
+            [calcId]: { ...(prev[calcId] || {}), [key]: value },
+        }));
+    }, []);
 
-    const removeUserTempItem = (id: string) => {
-        setUserTempItems((prev) => prev.filter((t) => t.id !== id));
-    };
+    const setCalcDropdown = useCallback((calcId: string, key: string, value: string) => {
+        setDropdownsByCalc((prev) => ({
+            ...prev,
+            [calcId]: { ...(prev[calcId] || {}), [key]: value },
+        }));
+    }, []);
 
-    const updateUserTempItem = (id: string, updates: Partial<UserTempItem>) => {
-        setUserTempItems((prev) =>
-            prev.map((t) => (t.id === id ? { ...t, ...updates } : t)),
-        );
-    };
+    // Compute result for each active calculator
+    const calcResults = useMemo(() => {
+        const results: Record<string, { formulaResults: Record<string, string>; total: string; subtotal: number; profitAmount: number; afterProfit: number; gstAmount: number; finalAmount: number }> = {};
+        for (const calc of activeCalcs) {
+            const inputs = inputsByCalc[calc.id] || {};
+            const dropdowns = dropdownsByCalc[calc.id] || {};
+            const result = calculateResult(calc, inputs, dropdowns, []);
 
-    // Get focused input definition for reference sidebar
+            // Calculate subtotal, profit, GST flow
+            const grandTotalFormula = calc.formulas.find((f) => f.isTotal);
+            const subtotal = grandTotalFormula
+                ? parseFloat(result.formulaResults[grandTotalFormula.key] || '0')
+                : parseFloat(result.total || '0');
+
+            const profitPct = parseFloat(calc.profitPercent || '0') || 0;
+            const profitAmount = subtotal * (profitPct / 100);
+            const afterProfit = subtotal + profitAmount;
+
+            const gstPct = parseFloat(calc.gstPercent || '0') || 0;
+            const gstAmount = afterProfit * (gstPct / 100);
+            const finalAmount = afterProfit + gstAmount;
+
+            results[calc.id] = {
+                ...result,
+                subtotal,
+                profitAmount,
+                afterProfit,
+                gstAmount,
+                finalAmount,
+            };
+        }
+        return results;
+    }, [activeCalcs, inputsByCalc, dropdownsByCalc, calculateResult]);
+
+    // Grand total = sum of all calculator final amounts
+    const grandTotal = useMemo(() => {
+        return Object.values(calcResults).reduce((sum, r) => sum + r.finalAmount, 0);
+    }, [calcResults]);
+
+    // Reference sidebar
     const focusedInputDef = focusedInputId
         ? inputDefinitions.find((i) => i.id === focusedInputId)
         : null;
@@ -143,9 +189,9 @@ export function SalesCalculator() {
                 {/* Main content */}
                 <div className="flex-1 space-y-4">
                     {/* Category browser */}
-                    {(!currentCalc || children.length > 0) && (
+                    {activeCalcs.length === 0 && (
                         <>
-                            {currentCategoryId && !currentCalc && (
+                            {currentCategoryId && (
                                 <button
                                     onClick={() => {
                                         const current = categories.find((c) => c.id === currentCategoryId);
@@ -199,8 +245,8 @@ export function SalesCalculator() {
                         </>
                     )}
 
-                    {/* Calculator form */}
-                    {categoryCalcs.length > 0 && (
+                    {/* Calculator sections */}
+                    {activeCalcs.length > 0 && (
                         <div className="space-y-4">
                             <button
                                 onClick={() => {
@@ -213,254 +259,105 @@ export function SalesCalculator() {
                                 Back to categories
                             </button>
 
-                            {/* Calculator Tabs — shown when multiple calculators exist */}
-                            {categoryCalcs.length > 1 && (
-                                <div className="flex items-center gap-2 flex-wrap">
-                                    {categoryCalcs.map((calc) => {
-                                        const isActive = currentCalc?.id === calc.id;
-                                        return (
-                                            <button
-                                                key={calc.id}
-                                                onClick={() => switchCalculator(calc.id)}
-                                                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-300 border ${isActive
-                                                    ? 'bg-black text-white border-black shadow-lg shadow-black/15'
-                                                    : 'bg-white/80 text-black/60 border-black/8 hover:border-black/15 hover:text-black hover:shadow-sm'
-                                                    }`}
-                                            >
-                                                <Calculator className="w-3.5 h-3.5" />
-                                                {calc.name}
-                                                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${isActive
-                                                    ? 'bg-white/20 text-white/80'
-                                                    : 'bg-black/5 text-black/30'
-                                                    }`}>
-                                                    {calc.formulas.length}f
-                                                </span>
-                                            </button>
-                                        );
-                                    })}
+                            {/* Render each active calculator as a section */}
+                            {activeCalcs.map((calc, idx) => (
+                                <CalculatorSection
+                                    key={calc.id}
+                                    calc={calc}
+                                    isFirst={idx === 0}
+                                    isCollapsed={collapsedCalcs[calc.id] || false}
+                                    inputs={inputsByCalc[calc.id] || {}}
+                                    dropdowns={dropdownsByCalc[calc.id] || {}}
+                                    result={calcResults[calc.id]}
+                                    inputDefinitions={inputDefinitions}
+                                    onSetInput={(key, val) => setCalcInput(calc.id, key, val)}
+                                    onSetDropdown={(key, val) => setCalcDropdown(calc.id, key, val)}
+                                    onToggleCollapse={() => toggleCollapse(calc.id)}
+                                    onRemove={idx > 0 ? () => removeCharge(calc.id) : undefined}
+                                    onFocusInput={(inputId) => {
+                                        setFocusedInputId(inputId);
+                                        setFocusedCalcId(calc.id);
+                                        setRefTreePath([]);
+                                    }}
+                                    focusedInputId={focusedCalcId === calc.id ? focusedInputId : null}
+                                />
+                            ))}
+
+                            {/* Add Charge button */}
+                            {availableToAdd.length > 0 && (
+                                <div className="relative">
+                                    <button
+                                        onClick={() => setShowAddCharge(!showAddCharge)}
+                                        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl border-2 border-dashed border-black/10 text-sm text-black/40 hover:text-black hover:border-black/20 font-semibold transition-all hover:bg-black/[0.02]"
+                                    >
+                                        <Plus className="w-4 h-4" />
+                                        Add Charge
+                                    </button>
+
+                                    {showAddCharge && (
+                                        <>
+                                            <div className="fixed inset-0 z-40" onClick={() => setShowAddCharge(false)} />
+                                            <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-50 bg-white rounded-2xl shadow-xl shadow-black/10 border border-black/8 p-2 min-w-[240px] animate-slide-up">
+                                                <p className="text-[10px] text-black/30 font-semibold uppercase tracking-wider px-3 py-1.5">
+                                                    Available Calculators
+                                                </p>
+                                                {availableToAdd.map((calc) => (
+                                                    <button
+                                                        key={calc.id}
+                                                        onClick={() => addCharge(calc.id)}
+                                                        className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-black/[0.03] transition-colors text-left group"
+                                                    >
+                                                        <div className="p-1.5 rounded-lg border bg-blue-50 text-blue-600 border-blue-200">
+                                                            <Calculator className="w-3.5 h-3.5" />
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-sm font-semibold text-black block">
+                                                                {calc.name}
+                                                            </span>
+                                                            <span className="text-[11px] text-black/40">
+                                                                {calc.formulas.length} formula{calc.formulas.length !== 1 ? 's' : ''}
+                                                            </span>
+                                                        </div>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </>
+                                    )}
                                 </div>
                             )}
 
-                            {/* Selected calculator's form */}
-                            {currentCalc && (
-                                <div className="glass rounded-2xl overflow-hidden">
-                                    <div className="border-b border-black/5 px-4 py-3 bg-black/[0.02]">
-                                        <h2 className="text-base font-semibold text-black">{currentCalc.name}</h2>
-                                    </div>
-
-                                    <div className="divide-y divide-black/5">
-                                        {usedInputDefs.map((inputDef) => (
-                                            <div
-                                                key={inputDef.id}
-                                                className="px-4 py-3 flex items-center justify-between gap-4"
-                                            >
-                                                <label className="text-base text-black shrink-0">
-                                                    {inputDef.name}
-                                                    {inputDef.isRequired && (
-                                                        <span className="text-red-400 ml-0.5">*</span>
-                                                    )}
-                                                </label>
-
-                                                <div className="w-48 shrink-0">
-                                                    {inputDef.type === 'number' && (
-                                                        <input
-                                                            type="text"
-                                                            value={inputs[inputDef.key] || ''}
-                                                            onChange={(e) =>
-                                                                setInputs((prev) => ({
-                                                                    ...prev,
-                                                                    [inputDef.key]: e.target.value,
-                                                                }))
-                                                            }
-                                                            placeholder="0"
-                                                            className={`w-full rounded-md bg-white border px-3 py-1.5 text-base text-black font-mono placeholder:text-black/30 outline-none focus:ring-1 text-right transition-colors ${focusedInputId === inputDef.id
-                                                                ? 'border-black/30 ring-black/20'
-                                                                : 'border-black/10 focus:ring-black/10'
-                                                                }`}
-                                                            onFocus={() => {
-                                                                setFocusedInputId(inputDef.id);
-                                                                setRefTreePath([]);
-                                                                if (
-                                                                    inputDef.referenceItems?.length ||
-                                                                    inputDef.refTree
-                                                                ) {
-                                                                    setShowTempList(true);
-                                                                }
-                                                            }}
-                                                        />
-                                                    )}
-
-                                                    {inputDef.type === 'dropdown' && (
-                                                        <select
-                                                            value={selectedDropdowns[inputDef.key] || ''}
-                                                            onChange={(e) =>
-                                                                setSelectedDropdowns((prev) => ({
-                                                                    ...prev,
-                                                                    [inputDef.key]: e.target.value,
-                                                                }))
-                                                            }
-                                                            className="w-full rounded-md bg-white border border-black/10 px-3 py-1.5 text-base text-black outline-none focus:ring-1 focus:ring-black/10"
-                                                            title={inputDef.name}
-                                                        >
-                                                            <option value="">Select...</option>
-                                                            {inputDef.dropdownOptions?.map((opt) => (
-                                                                <option key={opt.id} value={opt.value}>
-                                                                    {opt.label} — ₹{opt.rate}
-                                                                </option>
-                                                            ))}
-                                                        </select>
-                                                    )}
-
-                                                    {inputDef.type === 'fixed' && (
-                                                        <span className="text-base text-black font-mono block text-right">
-                                                            ₹{inputDef.fixedValue || '0'}
+                            {/* ═══ GRAND TOTAL ═══ */}
+                            {activeCalcs.length > 0 && (
+                                <div className="rounded-2xl overflow-hidden border-2 border-emerald-200 bg-gradient-to-r from-emerald-50 to-emerald-50/30">
+                                    {/* Per-calculator subtotals summary */}
+                                    {activeCalcs.length > 1 && (
+                                        <div className="px-5 pt-4 pb-2 space-y-1">
+                                            {activeCalcs.map((calc) => {
+                                                const r = calcResults[calc.id];
+                                                return (
+                                                    <div key={calc.id} className="flex items-center justify-between text-sm">
+                                                        <span className="text-emerald-700/70">{calc.name}</span>
+                                                        <span className="font-mono font-semibold text-emerald-600">
+                                                            ₹{r ? r.finalAmount.toFixed(2) : '0.00'}
                                                         </span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-
-                                    {result && currentCalc.formulas.length > 0 && (() => {
-                                        const sortedFormulas = [...currentCalc.formulas].sort((a, b) => a.order - b.order);
-                                        const grandTotal = sortedFormulas.find((f) => f.isTotal);
-                                        const regularFormulas = sortedFormulas.filter((f) => !f.isTotal);
-
-                                        return (
-                                            <>
-                                                {/* Regular formula results */}
-                                                {regularFormulas.length > 0 && (
-                                                    <div className="border-t border-black/5">
-                                                        <div className="px-4 py-2 text-sm font-semibold text-black/50 bg-black/[0.02] flex items-center gap-2">
-                                                            <span className="w-1.5 h-1.5 rounded-full bg-black/30" />
-                                                            Calculations
-                                                        </div>
-                                                        {regularFormulas.map((formula) => (
-                                                            <div
-                                                                key={formula.id}
-                                                                className="px-4 py-2.5 flex items-center justify-between border-t border-black/5"
-                                                            >
-                                                                <span className="text-base text-black/70">
-                                                                    {formula.label}
-                                                                </span>
-                                                                <span className="text-base font-mono font-semibold text-black">
-                                                                    ₹{result.formulaResults[formula.key] || '0'}
-                                                                </span>
-                                                            </div>
-                                                        ))}
                                                     </div>
-                                                )}
-
-                                                {/* Grand Total — prominent section with profit */}
-                                                {grandTotal && (() => {
-                                                    const baseValue = parseFloat(result.formulaResults[grandTotal.key] || '0');
-                                                    const profitPct = parseFloat(currentCalc.profitPercent || '0') || 0;
-                                                    const profitAmount = baseValue * (profitPct / 100);
-                                                    const finalTotal = baseValue + profitAmount;
-
-                                                    return (
-                                                        <div className="border-t-2 border-emerald-200 bg-gradient-to-r from-emerald-50 to-emerald-50/30">
-                                                            {/* Base total */}
-                                                            <div className="px-5 pt-3 pb-1 flex items-center justify-between">
-                                                                <div className="flex items-center gap-2">
-                                                                    <span className="text-emerald-500 text-lg">🏆</span>
-                                                                    <span className="text-sm font-semibold text-emerald-700">
-                                                                        {grandTotal.label}
-                                                                    </span>
-                                                                </div>
-                                                                <span className="text-sm font-mono font-semibold text-emerald-600">
-                                                                    ₹{baseValue.toFixed(2)}
-                                                                </span>
-                                                            </div>
-
-                                                            {/* Profit line */}
-                                                            {profitPct > 0 && (
-                                                                <div className="px-5 py-1 flex items-center justify-between text-emerald-500">
-                                                                    <span className="text-xs">
-                                                                        + Profit ({profitPct}%)
-                                                                    </span>
-                                                                    <span className="text-xs font-mono font-medium">
-                                                                        ₹{profitAmount.toFixed(2)}
-                                                                    </span>
-                                                                </div>
-                                                            )}
-
-                                                            {/* Final total */}
-                                                            <div className="px-5 pt-1 pb-3 flex items-center justify-between border-t border-emerald-200/50 mt-1">
-                                                                <span className="text-lg font-bold text-emerald-800">
-                                                                    Grand Total
-                                                                </span>
-                                                                <span className="text-xl font-mono font-bold text-emerald-700">
-                                                                    ₹{finalTotal.toFixed(2)}
-                                                                </span>
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                })()}
-                                            </>
-                                        );
-                                    })()}
-
-                                    {/* User temp items */}
-                                    {userTempItems.length > 0 && (
-                                        <div className="border-t border-black/5">
-                                            <div className="px-4 py-2 text-sm text-black/50 bg-black/[0.01]">
-                                                Additional Items
-                                            </div>
-                                            {userTempItems.map((item) => (
-                                                <div key={item.id} className="px-4 py-2 flex items-center gap-3 border-t border-black/5">
-                                                    <input
-                                                        type="text"
-                                                        value={item.name}
-                                                        onChange={(e) => updateUserTempItem(item.id, { name: e.target.value })}
-                                                        placeholder="Item name..."
-                                                        className="flex-1 rounded bg-white border border-black/10 px-2 py-1 text-sm text-black placeholder:text-black/30 outline-none"
-                                                    />
-                                                    <input
-                                                        type="text"
-                                                        value={item.rate}
-                                                        onChange={(e) => updateUserTempItem(item.id, { rate: e.target.value })}
-                                                        placeholder="₹ Rate"
-                                                        className="w-24 rounded bg-white border border-black/10 px-2 py-1 text-sm text-black font-mono placeholder:text-black/30 outline-none text-right"
-                                                    />
-                                                    <button
-                                                        onClick={() => removeUserTempItem(item.id)}
-                                                        className="p-1 rounded text-black/20 hover:text-red-500 transition-colors"
-                                                        title="Remove item"
-                                                    >
-                                                        <Trash2 className="w-3 h-3" />
-                                                    </button>
-                                                </div>
-                                            ))}
+                                                );
+                                            })}
+                                            <div className="border-t border-emerald-200/60 my-1" />
                                         </div>
                                     )}
 
-                                    {/* Total + actions */}
-                                    <div className="border-t border-black/5 px-4 py-4 bg-black/[0.01] flex items-center justify-between">
-                                        <div className="flex gap-2">
-                                            <button
-                                                onClick={addUserTempItem}
-                                                className="flex items-center gap-1.5 text-sm text-black/50 hover:text-black border border-black/10 px-3 py-1.5 rounded-xl hover:bg-black/[0.04] transition-colors"
-                                            >
-                                                <Plus className="w-3 h-3" />
-                                                Add Item
-                                            </button>
-                                        </div>
-
-                                        <div className="text-right">
-                                            <span className="text-sm text-black/50 block">Grand Total</span>
-                                            <span className="text-xl font-bold text-black font-mono">
-                                                ₹{(() => {
-                                                    const grandTotalFormula = currentCalc.formulas.find((f) => f.isTotal);
-                                                    if (grandTotalFormula && result) {
-                                                        const base = parseFloat(result.formulaResults[grandTotalFormula.key] || '0');
-                                                        const pct = parseFloat(currentCalc.profitPercent || '0') || 0;
-                                                        return (base + base * (pct / 100)).toFixed(2);
-                                                    }
-                                                    return result?.total || '0';
-                                                })()}
+                                    {/* Grand Total */}
+                                    <div className={`px-5 ${activeCalcs.length > 1 ? 'pt-1 pb-4' : 'py-4'} flex items-center justify-between`}>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-emerald-500 text-lg">🏆</span>
+                                            <span className="text-lg font-bold text-emerald-800">
+                                                Grand Total
                                             </span>
                                         </div>
+                                        <span className="text-xl font-mono font-bold text-emerald-700">
+                                            ₹{grandTotal.toFixed(2)}
+                                        </span>
                                     </div>
                                 </div>
                             )}
@@ -469,7 +366,7 @@ export function SalesCalculator() {
                 </div>
 
                 {/* Reference sidebar */}
-                {showTempList && focusedInputDef && (() => {
+                {focusedInputDef && focusedCalcId && (() => {
                     const refItems = focusedInputDef.referenceItems || [];
                     const refTree = focusedInputDef.refTree;
                     const hasAnything = refItems.length > 0 || refTree;
@@ -478,8 +375,18 @@ export function SalesCalculator() {
 
                     // Tree navigation
                     let treeCurrentNodes: RefTreeNode[] = [];
-                    let treeCurrentLevel = '';
-                    let treeBreadcrumb: { id: string; name: string }[] = [];
+                    if (refTree) {
+                        let nodes = refTree.nodes;
+                        for (let i = 0; i < refTreePath.length; i++) {
+                            const found = nodes.find((n) => n.id === refTreePath[i]);
+                            if (found) {
+                                nodes = found.children || [];
+                            } else break;
+                        }
+                        treeCurrentNodes = nodes;
+                    }
+
+                    const treeBreadcrumb: { id: string; name: string }[] = [];
                     if (refTree) {
                         let nodes = refTree.nodes;
                         for (let i = 0; i < refTreePath.length; i++) {
@@ -489,8 +396,6 @@ export function SalesCalculator() {
                                 nodes = found.children || [];
                             } else break;
                         }
-                        treeCurrentNodes = nodes;
-                        treeCurrentLevel = refTree.levels[refTreePath.length] || 'Rate';
                     }
 
                     return (
@@ -502,8 +407,8 @@ export function SalesCalculator() {
                                     </h3>
                                     <button
                                         onClick={() => {
-                                            setShowTempList(false);
                                             setFocusedInputId(null);
+                                            setFocusedCalcId(null);
                                             setRefTreePath([]);
                                         }}
                                         className="p-1 rounded text-black/30 hover:text-black transition-colors"
@@ -550,17 +455,14 @@ export function SalesCalculator() {
                                                     <button
                                                         key={node.id}
                                                         onClick={() => {
-                                                            if (isLeaf && hasRate) {
-                                                                setInputs((prev) => ({
-                                                                    ...prev,
-                                                                    [focusedInputDef.key]: node.rate!,
-                                                                }));
+                                                            if (isLeaf && hasRate && focusedCalcId) {
+                                                                setCalcInput(focusedCalcId, focusedInputDef.key, node.rate!);
                                                             } else if (!isLeaf) {
                                                                 setRefTreePath([...refTreePath, node.id]);
                                                             }
                                                         }}
                                                         disabled={isLeaf && !hasRate}
-                                                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-colors ${isLeaf && hasRate && inputs[focusedInputDef.key] === node.rate
+                                                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-colors ${isLeaf && hasRate && (inputsByCalc[focusedCalcId || ''] || {})[focusedInputDef.key] === node.rate
                                                             ? 'bg-black/[0.06] ring-1 ring-black/10'
                                                             : isLeaf && !hasRate
                                                                 ? 'opacity-40 cursor-not-allowed'
@@ -595,12 +497,11 @@ export function SalesCalculator() {
                                                 <button
                                                     key={item.id}
                                                     onClick={() => {
-                                                        setInputs((prev) => ({
-                                                            ...prev,
-                                                            [focusedInputDef.key]: item.value,
-                                                        }));
+                                                        if (focusedCalcId) {
+                                                            setCalcInput(focusedCalcId, focusedInputDef.key, item.value);
+                                                        }
                                                     }}
-                                                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-colors ${inputs[focusedInputDef.key] === item.value
+                                                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-colors ${(inputsByCalc[focusedCalcId || ''] || {})[focusedInputDef.key] === item.value
                                                         ? 'bg-black/[0.06] ring-1 ring-black/10'
                                                         : 'hover:bg-white'
                                                         }`}
@@ -621,6 +522,242 @@ export function SalesCalculator() {
                     );
                 })()}
             </div>
+        </div>
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// CALCULATOR SECTION — One charge section with inputs, formulas, breakdown
+// ═══════════════════════════════════════════════════════════════════════
+
+function CalculatorSection({
+    calc,
+    isFirst,
+    isCollapsed,
+    inputs,
+    dropdowns,
+    result,
+    inputDefinitions,
+    onSetInput,
+    onSetDropdown,
+    onToggleCollapse,
+    onRemove,
+    onFocusInput,
+    focusedInputId,
+}: {
+    calc: CalcType;
+    isFirst: boolean;
+    isCollapsed: boolean;
+    inputs: Record<string, string>;
+    dropdowns: Record<string, string>;
+    result?: {
+        formulaResults: Record<string, string>;
+        total: string;
+        subtotal: number;
+        profitAmount: number;
+        afterProfit: number;
+        gstAmount: number;
+        finalAmount: number;
+    };
+    inputDefinitions: InputDefinition[];
+    onSetInput: (key: string, val: string) => void;
+    onSetDropdown: (key: string, val: string) => void;
+    onToggleCollapse: () => void;
+    onRemove?: () => void;
+    onFocusInput: (id: string) => void;
+    focusedInputId: string | null;
+}) {
+    const usedInputDefs = inputDefinitions
+        .filter((i) => calc.usedInputIds.includes(i.id))
+        .sort((a, b) => a.order - b.order);
+
+    const sortedFormulas = [...calc.formulas].sort((a, b) => a.order - b.order);
+    const grandTotalFormula = sortedFormulas.find((f) => f.isTotal);
+    const regularFormulas = sortedFormulas.filter((f) => !f.isTotal);
+    const profitPct = parseFloat(calc.profitPercent || '0') || 0;
+    const gstPct = parseFloat(calc.gstPercent || '0') || 0;
+
+    return (
+        <div className="glass rounded-2xl overflow-hidden">
+            {/* Section Header */}
+            <div
+                className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors ${isFirst ? 'bg-black/[0.02]' : 'bg-blue-50/50'
+                    }`}
+                onClick={onToggleCollapse}
+            >
+                <div className={`p-1.5 rounded-lg border ${isFirst ? 'bg-black/5 border-black/10 text-black/60' : 'bg-blue-50 border-blue-200 text-blue-600'}`}>
+                    <Calculator className="w-3.5 h-3.5" />
+                </div>
+                <h2 className="text-base font-semibold text-black flex-1">{calc.name}</h2>
+
+                {/* Subtotal badge */}
+                {result && (
+                    <span className="text-sm font-mono font-semibold text-black/60">
+                        ₹{result.finalAmount.toFixed(2)}
+                    </span>
+                )}
+
+                {/* Collapse/Remove actions */}
+                <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                    {onRemove && (
+                        <button
+                            onClick={onRemove}
+                            className="p-1.5 rounded-lg text-black/20 hover:text-red-500 hover:bg-red-50 transition-colors"
+                            title="Remove charge"
+                        >
+                            <X className="w-3.5 h-3.5" />
+                        </button>
+                    )}
+                </div>
+
+                {isCollapsed ? (
+                    <ChevronDown className="w-4 h-4 text-black/20" />
+                ) : (
+                    <ChevronUp className="w-4 h-4 text-black/20" />
+                )}
+            </div>
+
+            {/* Section Content */}
+            {!isCollapsed && (
+                <div className="animate-slide-up">
+                    {/* Input fields */}
+                    <div className="divide-y divide-black/5">
+                        {usedInputDefs.map((inputDef) => (
+                            <div
+                                key={inputDef.id}
+                                className="px-4 py-3 flex items-center justify-between gap-4"
+                            >
+                                <label className="text-base text-black shrink-0">
+                                    {inputDef.name}
+                                    {inputDef.isRequired && (
+                                        <span className="text-red-400 ml-0.5">*</span>
+                                    )}
+                                </label>
+
+                                <div className="w-48 shrink-0">
+                                    {inputDef.type === 'number' && (
+                                        <input
+                                            type="text"
+                                            value={inputs[inputDef.key] || ''}
+                                            onChange={(e) => onSetInput(inputDef.key, e.target.value)}
+                                            placeholder="0"
+                                            className={`w-full rounded-md bg-white border px-3 py-1.5 text-base text-black font-mono placeholder:text-black/30 outline-none focus:ring-1 text-right transition-colors ${focusedInputId === inputDef.id
+                                                ? 'border-black/30 ring-black/20'
+                                                : 'border-black/10 focus:ring-black/10'
+                                                }`}
+                                            onFocus={() => {
+                                                if (inputDef.referenceItems?.length || inputDef.refTree) {
+                                                    onFocusInput(inputDef.id);
+                                                }
+                                            }}
+                                        />
+                                    )}
+
+                                    {inputDef.type === 'dropdown' && (
+                                        <select
+                                            value={dropdowns[inputDef.key] || ''}
+                                            onChange={(e) => onSetDropdown(inputDef.key, e.target.value)}
+                                            className="w-full rounded-md bg-white border border-black/10 px-3 py-1.5 text-base text-black outline-none focus:ring-1 focus:ring-black/10"
+                                            title={inputDef.name}
+                                        >
+                                            <option value="">Select...</option>
+                                            {inputDef.dropdownOptions?.map((opt) => (
+                                                <option key={opt.id} value={opt.value}>
+                                                    {opt.label} — ₹{opt.rate}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    )}
+
+                                    {inputDef.type === 'fixed' && (
+                                        <span className="text-base text-black font-mono block text-right">
+                                            ₹{inputDef.fixedValue || '0'}
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Formula results */}
+                    {result && sortedFormulas.length > 0 && (
+                        <>
+                            {regularFormulas.length > 0 && (
+                                <div className="border-t border-black/5">
+                                    <div className="px-4 py-2 text-sm font-semibold text-black/50 bg-black/[0.02] flex items-center gap-2">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-black/30" />
+                                        Calculations
+                                    </div>
+                                    {regularFormulas.map((formula) => (
+                                        <div
+                                            key={formula.id}
+                                            className="px-4 py-2.5 flex items-center justify-between border-t border-black/5"
+                                        >
+                                            <span className="text-base text-black/70">
+                                                {formula.label}
+                                            </span>
+                                            <span className="text-base font-mono font-semibold text-black">
+                                                ₹{result.formulaResults[formula.key] || '0'}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Subtotal + Profit + GST breakdown */}
+                            {grandTotalFormula && (
+                                <div className="border-t border-black/8 bg-gradient-to-r from-black/[0.02] to-transparent">
+                                    {/* Subtotal */}
+                                    <div className="px-4 py-2 flex items-center justify-between">
+                                        <span className="text-sm font-semibold text-black/50">
+                                            {grandTotalFormula.label}
+                                        </span>
+                                        <span className="text-sm font-mono font-semibold text-black/60">
+                                            ₹{result.subtotal.toFixed(2)}
+                                        </span>
+                                    </div>
+
+                                    {/* Profit line */}
+                                    {profitPct > 0 && (
+                                        <div className="px-4 py-1 flex items-center justify-between text-black/40">
+                                            <span className="text-xs">
+                                                + Profit ({profitPct}%)
+                                            </span>
+                                            <span className="text-xs font-mono font-medium">
+                                                ₹{result.profitAmount.toFixed(2)}
+                                            </span>
+                                        </div>
+                                    )}
+
+                                    {/* GST line */}
+                                    {gstPct > 0 && (
+                                        <div className="px-4 py-1 flex items-center justify-between text-black/40">
+                                            <span className="text-xs">
+                                                + GST ({gstPct}%)
+                                            </span>
+                                            <span className="text-xs font-mono font-medium">
+                                                ₹{result.gstAmount.toFixed(2)}
+                                            </span>
+                                        </div>
+                                    )}
+
+                                    {/* Section total */}
+                                    {(profitPct > 0 || gstPct > 0) && (
+                                        <div className="px-4 py-2 flex items-center justify-between border-t border-black/5">
+                                            <span className="text-sm font-bold text-black/70">
+                                                {calc.name} Total
+                                            </span>
+                                            <span className="text-sm font-mono font-bold text-black">
+                                                ₹{result.finalAmount.toFixed(2)}
+                                            </span>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </>
+                    )}
+                </div>
+            )}
         </div>
     );
 }

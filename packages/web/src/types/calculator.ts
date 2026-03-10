@@ -107,7 +107,8 @@ export interface Calculator {
     formulas: CalculatorFormula[];
     localRates: LocalRate[];
     usedInputIds: string[];
-    profitPercent?: string; // Profit % added on top of grand total
+    profitPercent?: string; // Profit % added on top of subtotal
+    gstPercent?: string;    // GST % added on top of (subtotal + profit)
 }
 
 // ─── User Calculation State (Sales Side) ──────────────────────────────

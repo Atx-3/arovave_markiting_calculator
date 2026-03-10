@@ -448,22 +448,47 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
 
                                 {/* Profit % input */}
                                 {sortedFormulas.some((f) => f.isTotal) && (
-                                    <div className="mt-3 pt-3 border-t border-black/5 flex items-center gap-3">
-                                        <label className="text-[11px] font-semibold text-black/40 shrink-0">
-                                            Profit %
-                                        </label>
-                                        <div className="relative">
-                                            <input
-                                                type="text"
-                                                value={calc.profitPercent || ''}
-                                                onChange={(e) => updateCalculator(calculatorId, { profitPercent: e.target.value })}
-                                                placeholder="0"
-                                                className="w-20 text-sm font-mono font-semibold text-black bg-black/[0.03] rounded-lg px-3 py-1.5 pr-7 outline-none focus:ring-2 focus:ring-emerald-200 border border-black/5"
-                                            />
-                                            <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-black/30 font-bold">%</span>
+                                    <div className="mt-3 pt-3 border-t border-black/5 flex items-center gap-5 flex-wrap">
+                                        <div className="flex items-center gap-2">
+                                            <label className="text-[11px] font-semibold text-black/40 shrink-0">
+                                                Profit %
+                                            </label>
+                                            <div className="relative">
+                                                <input
+                                                    type="text"
+                                                    inputMode="decimal"
+                                                    value={calc.profitPercent || ''}
+                                                    onChange={(e) => {
+                                                        const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./, '$1');
+                                                        updateCalculator(calculatorId, { profitPercent: v });
+                                                    }}
+                                                    placeholder="0"
+                                                    className="w-20 text-sm font-mono font-semibold text-black bg-black/[0.03] rounded-lg px-3 py-1.5 pr-7 outline-none focus:ring-2 focus:ring-emerald-200 border border-black/5"
+                                                />
+                                                <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-black/30 font-bold">%</span>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <label className="text-[11px] font-semibold text-black/40 shrink-0">
+                                                GST %
+                                            </label>
+                                            <div className="relative">
+                                                <input
+                                                    type="text"
+                                                    inputMode="decimal"
+                                                    value={calc.gstPercent || ''}
+                                                    onChange={(e) => {
+                                                        const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./, '$1');
+                                                        updateCalculator(calculatorId, { gstPercent: v });
+                                                    }}
+                                                    placeholder="0"
+                                                    className="w-20 text-sm font-mono font-semibold text-black bg-black/[0.03] rounded-lg px-3 py-1.5 pr-7 outline-none focus:ring-2 focus:ring-blue-200 border border-black/5"
+                                                />
+                                                <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-black/30 font-bold">%</span>
+                                            </div>
                                         </div>
                                         <span className="text-[10px] text-black/25">
-                                            Added on top of grand total
+                                            Applied on this calculator's subtotal
                                         </span>
                                     </div>
                                 )}
