@@ -8,9 +8,13 @@ import {
     ChevronDown,
     ChevronUp,
     Plus,
+    FileText,
+    MessageCircle,
 } from 'lucide-react';
 import { useAppStore } from '../../stores/templateStore';
 import type { RefTreeNode, Calculator as CalcType, InputDefinition } from '../../types/calculator';
+import { QuotationModal } from '../../components/QuotationModal';
+import type { QuotationData, QuotationLineItem } from '../../components/QuotationModal';
 
 // ═══════════════════════════════════════════════════════════════════════
 // SALES CALCULATOR — Single-calc-per-category + Additional Charges
@@ -37,12 +41,16 @@ export function SalesCalculator() {
     const [chargeDropdowns, setChargeDropdowns] = useState<Record<string, Record<string, string>>>({});
     // Which charges are active (user clicked the + button)
     const [activeChargeIds, setActiveChargeIds] = useState<string[]>([]);
+    // Temporary extra charges added by sales user (label + amount)
+    const [extraCharges, setExtraCharges] = useState<{ id: string; label: string; amount: string }[]>([]);
     // Collapse state for charges
     const [collapsedCharges, setCollapsedCharges] = useState<Record<string, boolean>>({});
     // Reference sidebar
     const [focusedInputId, setFocusedInputId] = useState<string | null>(null);
     const [focusedSourceId, setFocusedSourceId] = useState<string | null>(null); // calc or charge id
     const [refTreePath, setRefTreePath] = useState<string[]>([]);
+    // Quotation modal
+    const [showQuotationModal, setShowQuotationModal] = useState(false);
 
     // Navigation
     const children = getCategoryChildren(currentCategoryId);
@@ -133,14 +141,20 @@ export function SalesCalculator() {
         return results;
     }, [activeCharges, chargeInputs, chargeDropdowns, calculateResult]);
 
-    // Grand total = main + all charges
+    // Extra charges total
+    const extraChargesTotal = useMemo(() => {
+        return extraCharges.reduce((sum, ec) => sum + (parseFloat(ec.amount) || 0), 0);
+    }, [extraCharges]);
+
+    // Grand total = main + all charges + extra charges
     const grandTotal = useMemo(() => {
         let total = mainResult?.finalAmount || 0;
         for (const r of Object.values(chargeResults)) {
             total += r.finalAmount;
         }
+        total += extraChargesTotal;
         return total;
-    }, [mainResult, chargeResults]);
+    }, [mainResult, chargeResults, extraChargesTotal]);
 
     // Reference sidebar
     const focusedInputDef = focusedInputId
@@ -151,378 +165,503 @@ export function SalesCalculator() {
     const displayChildren = currentCategoryId ? children : rootCategories;
 
     return (
-        <div className="space-y-6 animate-fade-in">
-            {/* Header */}
-            <div>
-                <h1 className="text-2xl font-bold text-black flex items-center gap-3">
-                    <Calculator className="w-6 h-6 text-black" />
-                    Pricing Calculator
-                </h1>
-                <p className="mt-1 text-base text-black/50">
-                    Select a product category and fill the form to calculate pricing.
-                </p>
-            </div>
-
-            {/* Breadcrumb */}
-            {breadcrumb.length > 0 && (
-                <div className="flex items-center gap-1.5 flex-wrap">
-                    <button
-                        onClick={() => navigateTo(null)}
-                        className="text-sm text-black/50 hover:text-black transition-colors"
-                    >
-                        Home
-                    </button>
-                    {breadcrumb.map((cat, i) => (
-                        <span key={cat.id} className="flex items-center gap-1.5">
-                            <ChevronRight className="w-3 h-3 text-black/30" />
-                            <button
-                                onClick={() => navigateTo(cat.id)}
-                                className={`text-sm transition-colors ${i === breadcrumb.length - 1
-                                    ? 'text-black font-semibold'
-                                    : 'text-black/50 hover:text-black'
-                                    }`}
-                            >
-                                {cat.name}
-                            </button>
-                        </span>
-                    ))}
+        <>
+            <div className="space-y-6 animate-fade-in">
+                {/* Header */}
+                <div>
+                    <h1 className="text-2xl font-bold text-black flex items-center gap-3">
+                        <Calculator className="w-6 h-6 text-black" />
+                        Pricing Calculator
+                    </h1>
+                    <p className="mt-1 text-base text-black/50">
+                        Select a product category and fill the form to calculate pricing.
+                    </p>
                 </div>
-            )}
 
-            <div className="flex gap-6">
-                {/* Main content */}
-                <div className="flex-1 space-y-4">
-                    {/* Back button */}
-                    {currentCategoryId && (
+                {/* Breadcrumb */}
+                {breadcrumb.length > 0 && (
+                    <div className="flex items-center gap-1.5 flex-wrap">
                         <button
-                            onClick={() => {
-                                const current = categories.find((c) => c.id === currentCategoryId);
-                                navigateTo(current?.parentId || null);
-                            }}
-                            className="flex items-center gap-1.5 text-sm text-black/50 hover:text-black transition-colors"
+                            onClick={() => navigateTo(null)}
+                            className="text-sm text-black/50 hover:text-black transition-colors"
                         >
-                            <ArrowLeft className="w-3 h-3" />
-                            Back
+                            Home
                         </button>
-                    )}
+                        {breadcrumb.map((cat, i) => (
+                            <span key={cat.id} className="flex items-center gap-1.5">
+                                <ChevronRight className="w-3 h-3 text-black/30" />
+                                <button
+                                    onClick={() => navigateTo(cat.id)}
+                                    className={`text-sm transition-colors ${i === breadcrumb.length - 1
+                                        ? 'text-black font-semibold'
+                                        : 'text-black/50 hover:text-black'
+                                        }`}
+                                >
+                                    {cat.name}
+                                </button>
+                            </span>
+                        ))}
+                    </div>
+                )}
 
-                    {/* Category browser — show when there are subcategories */}
-                    {displayChildren.length > 0 && (
-                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                            {displayChildren.map((cat) => {
-                                const calcs = store.getCalculatorsForCategory(cat.id);
-                                const hasCalc = calcs.length > 0;
-                                const subChildren = getCategoryChildren(cat.id);
-
-                                return (
-                                    <button
-                                        key={cat.id}
-                                        onClick={() => navigateTo(cat.id)}
-                                        className="glass rounded-2xl p-4 text-left hover:border-black/15 border border-transparent transition-all duration-200 group"
-                                    >
-                                        {hasCalc ? (
-                                            <Calculator className="w-6 h-6 text-black mb-2 group-hover:scale-110 transition-transform" />
-                                        ) : (
-                                            <FolderOpen className="w-6 h-6 text-black/50 mb-2 group-hover:scale-110 transition-transform" />
-                                        )}
-                                        <span className="text-base font-semibold text-black block">{cat.name}</span>
-                                        <span className="text-[11px] text-black/40 mt-0.5 block">
-                                            {hasCalc
-                                                ? `${calcs.length} calculator${calcs.length > 1 ? 's' : ''}`
-                                                : `${subChildren.length} sub-categories`}
-                                        </span>
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    )}
-
-                    {/* Empty state */}
-                    {displayChildren.length === 0 && !currentCalc && (
-                        <div className="glass rounded-2xl p-10 text-center">
-                            <Calculator className="w-12 h-12 text-black/20 mx-auto mb-3" />
-                            <p className="text-black/40 text-base">
-                                {currentCategoryId
-                                    ? 'No calculator set up for this category yet.'
-                                    : 'No categories yet. Ask your admin to create product categories.'}
-                            </p>
-                        </div>
-                    )}
-
-                    {/* ═══ MAIN CALCULATOR ═══ */}
-                    {currentCalc && displayChildren.length === 0 && (
-                        <div className="space-y-4">
-                            {/* Main calculator section */}
-                            <CalcSection
-                                calc={currentCalc}
-                                label={currentCalc.name}
-                                isMain={true}
-                                isCollapsed={false}
-                                inputs={mainInputs}
-                                dropdowns={mainDropdowns}
-                                result={mainResult}
-                                inputDefinitions={inputDefinitions}
-                                onSetInput={(key, val) => setMainInputs((prev) => ({ ...prev, [key]: val }))}
-                                onSetDropdown={(key, val) => setMainDropdowns((prev) => ({ ...prev, [key]: val }))}
-                                onFocusInput={(inputId) => {
-                                    setFocusedInputId(inputId);
-                                    setFocusedSourceId(currentCalc.id);
-                                    setRefTreePath([]);
+                <div className="flex gap-6">
+                    {/* Main content */}
+                    <div className="flex-1 space-y-4">
+                        {/* Back button */}
+                        {currentCategoryId && (
+                            <button
+                                onClick={() => {
+                                    const current = categories.find((c) => c.id === currentCategoryId);
+                                    navigateTo(current?.parentId || null);
                                 }}
-                                focusedInputId={focusedSourceId === currentCalc.id ? focusedInputId : null}
-                            />
+                                className="flex items-center gap-1.5 text-sm text-black/50 hover:text-black transition-colors"
+                            >
+                                <ArrowLeft className="w-3 h-3" />
+                                Back
+                            </button>
+                        )}
 
-                            {/* ═══ ACTIVE CHARGES (expanded) ═══ */}
-                            {activeCharges.map((charge) => {
-                                const isCollapsed = collapsedCharges[charge.id] || false;
-                                const result = chargeResults[charge.id];
+                        {/* Category browser — show when there are subcategories */}
+                        {displayChildren.length > 0 && (
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                                {displayChildren.map((cat) => {
+                                    const calcs = store.getCalculatorsForCategory(cat.id);
+                                    const hasCalc = calcs.length > 0;
+                                    const subChildren = getCategoryChildren(cat.id);
 
-                                return (
-                                    <CalcSection
-                                        key={charge.id}
-                                        calc={charge}
-                                        label={charge.name}
-                                        isMain={false}
-                                        isCollapsed={isCollapsed}
-                                        inputs={chargeInputs[charge.id] || {}}
-                                        dropdowns={chargeDropdowns[charge.id] || {}}
-                                        result={result}
-                                        inputDefinitions={inputDefinitions}
-                                        onSetInput={(key, val) => setChargeInput(charge.id, key, val)}
-                                        onSetDropdown={(key, val) => setChargeDropdown(charge.id, key, val)}
-                                        onToggleCollapse={() => setCollapsedCharges((prev) => ({ ...prev, [charge.id]: !prev[charge.id] }))}
-                                        onRemove={() => setActiveChargeIds((prev) => prev.filter((id) => id !== charge.id))}
-                                        onFocusInput={(inputId) => {
-                                            setFocusedInputId(inputId);
-                                            setFocusedSourceId(charge.id);
-                                            setRefTreePath([]);
-                                        }}
-                                        focusedInputId={focusedSourceId === charge.id ? focusedInputId : null}
-                                    />
-                                );
-                            })}
-
-                            {/* ═══ INACTIVE CHARGES (+ buttons) ═══ */}
-                            {inactiveCharges.length > 0 && (
-                                <div className="flex flex-wrap gap-2">
-                                    {inactiveCharges.map((charge) => (
+                                    return (
                                         <button
-                                            key={charge.id}
-                                            onClick={() => setActiveChargeIds((prev) => [...prev, charge.id])}
-                                            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-dashed border-black/15 hover:border-blue-300 hover:bg-blue-50/40 text-black/40 hover:text-blue-600 transition-all group"
+                                            key={cat.id}
+                                            onClick={() => navigateTo(cat.id)}
+                                            className="glass rounded-2xl p-4 text-left hover:border-black/15 border border-transparent transition-all duration-200 group"
                                         >
-                                            <Plus className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
-                                            <span className="text-sm font-semibold">{charge.name}</span>
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-
-                            {/* ═══ GRAND TOTAL ═══ */}
-                            <div className="rounded-2xl overflow-hidden border-2 border-emerald-200 bg-gradient-to-r from-emerald-50 to-emerald-50/30">
-                                {/* Per-section subtotals when there are active charges */}
-                                {activeCharges.length > 0 && (
-                                    <div className="px-5 pt-4 pb-2 space-y-1">
-                                        <div className="flex items-center justify-between text-sm">
-                                            <span className="text-emerald-700/70">{currentCalc.name}</span>
-                                            <span className="font-mono font-semibold text-emerald-600">
-                                                ₹{mainResult ? mainResult.finalAmount.toFixed(2) : '0.00'}
+                                            {hasCalc ? (
+                                                <Calculator className="w-6 h-6 text-black mb-2 group-hover:scale-110 transition-transform" />
+                                            ) : (
+                                                <FolderOpen className="w-6 h-6 text-black/50 mb-2 group-hover:scale-110 transition-transform" />
+                                            )}
+                                            <span className="text-base font-semibold text-black block">{cat.name}</span>
+                                            <span className="text-[11px] text-black/40 mt-0.5 block">
+                                                {hasCalc
+                                                    ? `${calcs.length} calculator${calcs.length > 1 ? 's' : ''}`
+                                                    : `${subChildren.length} sub-categories`}
                                             </span>
-                                        </div>
-                                        {activeCharges.map((charge) => (
-                                            <div key={charge.id} className="flex items-center justify-between text-sm">
-                                                <span className="text-emerald-700/70">{charge.name}</span>
-                                                <span className="font-mono font-semibold text-emerald-600">
-                                                    ₹{chargeResults[charge.id] ? chargeResults[charge.id].finalAmount.toFixed(2) : '0.00'}
-                                                </span>
-                                            </div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        )}
+
+                        {/* Empty state */}
+                        {displayChildren.length === 0 && !currentCalc && (
+                            <div className="glass rounded-2xl p-10 text-center">
+                                <Calculator className="w-12 h-12 text-black/20 mx-auto mb-3" />
+                                <p className="text-black/40 text-base">
+                                    {currentCategoryId
+                                        ? 'No calculator set up for this category yet.'
+                                        : 'No categories yet. Ask your admin to create product categories.'}
+                                </p>
+                            </div>
+                        )}
+
+                        {/* ═══ MAIN CALCULATOR ═══ */}
+                        {currentCalc && displayChildren.length === 0 && (
+                            <div className="space-y-4">
+                                {/* Main calculator section */}
+                                <CalcSection
+                                    calc={currentCalc}
+                                    label={currentCalc.name}
+                                    isMain={true}
+                                    isCollapsed={false}
+                                    inputs={mainInputs}
+                                    dropdowns={mainDropdowns}
+                                    result={mainResult}
+                                    inputDefinitions={inputDefinitions}
+                                    onSetInput={(key, val) => setMainInputs((prev) => ({ ...prev, [key]: val }))}
+                                    onSetDropdown={(key, val) => setMainDropdowns((prev) => ({ ...prev, [key]: val }))}
+                                    onFocusInput={(inputId) => {
+                                        setFocusedInputId(inputId);
+                                        setFocusedSourceId(currentCalc.id);
+                                        setRefTreePath([]);
+                                    }}
+                                    focusedInputId={focusedSourceId === currentCalc.id ? focusedInputId : null}
+                                />
+
+                                {/* ═══ ACTIVE CHARGES (expanded) ═══ */}
+                                {activeCharges.map((charge) => {
+                                    const isCollapsed = collapsedCharges[charge.id] || false;
+                                    const result = chargeResults[charge.id];
+
+                                    return (
+                                        <CalcSection
+                                            key={charge.id}
+                                            calc={charge}
+                                            label={charge.name}
+                                            isMain={false}
+                                            isCollapsed={isCollapsed}
+                                            inputs={chargeInputs[charge.id] || {}}
+                                            dropdowns={chargeDropdowns[charge.id] || {}}
+                                            result={result}
+                                            inputDefinitions={inputDefinitions}
+                                            onSetInput={(key, val) => setChargeInput(charge.id, key, val)}
+                                            onSetDropdown={(key, val) => setChargeDropdown(charge.id, key, val)}
+                                            onToggleCollapse={() => setCollapsedCharges((prev) => ({ ...prev, [charge.id]: !prev[charge.id] }))}
+                                            onRemove={() => setActiveChargeIds((prev) => prev.filter((id) => id !== charge.id))}
+                                            onFocusInput={(inputId) => {
+                                                setFocusedInputId(inputId);
+                                                setFocusedSourceId(charge.id);
+                                                setRefTreePath([]);
+                                            }}
+                                            focusedInputId={focusedSourceId === charge.id ? focusedInputId : null}
+                                        />
+                                    );
+                                })}
+
+                                {/* ═══ INACTIVE CHARGES (+ buttons) ═══ */}
+                                {inactiveCharges.length > 0 && (
+                                    <div className="flex flex-wrap gap-2">
+                                        {inactiveCharges.map((charge) => (
+                                            <button
+                                                key={charge.id}
+                                                onClick={() => setActiveChargeIds((prev) => [...prev, charge.id])}
+                                                className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-dashed border-black/15 hover:border-blue-300 hover:bg-blue-50/40 text-black/40 hover:text-blue-600 transition-all group"
+                                            >
+                                                <Plus className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                                                <span className="text-sm font-semibold">{charge.name}</span>
+                                            </button>
                                         ))}
-                                        <div className="border-t border-emerald-200/60 my-1" />
                                     </div>
                                 )}
 
-                                {/* Grand Total */}
-                                <div className={`px-5 ${activeCharges.length > 0 ? 'pt-1 pb-4' : 'py-4'} flex items-center justify-between`}>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-emerald-500 text-lg">🏆</span>
-                                        <span className="text-lg font-bold text-emerald-800">
-                                            Grand Total
-                                        </span>
-                                    </div>
-                                    <span className="text-xl font-mono font-bold text-emerald-700">
-                                        ₹{grandTotal.toFixed(2)}
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                {/* Reference sidebar */}
-                {focusedInputDef && focusedSourceId && (() => {
-                    const refItems = focusedInputDef.referenceItems || [];
-                    const refTree = focusedInputDef.refTree;
-                    const hasAnything = refItems.length > 0 || refTree;
-
-                    if (!hasAnything) return null;
-
-                    // Tree navigation
-                    let treeCurrentNodes: RefTreeNode[] = [];
-                    if (refTree) {
-                        let nodes = refTree.nodes;
-                        for (let i = 0; i < refTreePath.length; i++) {
-                            const found = nodes.find((n) => n.id === refTreePath[i]);
-                            if (found) {
-                                nodes = found.children || [];
-                            } else break;
-                        }
-                        treeCurrentNodes = nodes;
-                    }
-
-                    const treeBreadcrumb: { id: string; name: string }[] = [];
-                    if (refTree) {
-                        let nodes = refTree.nodes;
-                        for (let i = 0; i < refTreePath.length; i++) {
-                            const found = nodes.find((n) => n.id === refTreePath[i]);
-                            if (found) {
-                                treeBreadcrumb.push({ id: found.id, name: found.name || '...' });
-                                nodes = found.children || [];
-                            } else break;
-                        }
-                    }
-
-                    // Determine which input state to read/write
-                    const isMainCalc = focusedSourceId === currentCalc?.id;
-                    const currentInputs = isMainCalc ? mainInputs : (chargeInputs[focusedSourceId] || {});
-                    const handleSelectValue = (val: string) => {
-                        if (isMainCalc) {
-                            setMainInputs((prev) => ({ ...prev, [focusedInputDef.key]: val }));
-                        } else {
-                            setChargeInput(focusedSourceId, focusedInputDef.key, val);
-                        }
-                    };
-
-                    return (
-                        <div className="w-64 shrink-0">
-                            <div className="glass rounded-2xl p-4 space-y-3 sticky top-20">
-                                <div className="flex items-center justify-between">
-                                    <h3 className="text-sm font-semibold text-black">
-                                        {focusedInputDef.name} — Reference
-                                    </h3>
+                                {/* ═══ EXTRA CHARGES (user-added) ═══ */}
+                                <div className="space-y-2">
+                                    {extraCharges.map((ec) => (
+                                        <div key={ec.id} className="flex items-center gap-2 px-3 py-2 rounded-xl border border-black/8 bg-white/80">
+                                            <input
+                                                type="text"
+                                                value={ec.label}
+                                                onChange={(e) => setExtraCharges((prev) => prev.map((item) => item.id === ec.id ? { ...item, label: e.target.value } : item))}
+                                                placeholder="Charge name..."
+                                                className="flex-1 text-sm font-medium text-black bg-transparent outline-none placeholder:text-black/25"
+                                            />
+                                            <div className="flex items-center gap-1">
+                                                <span className="text-sm text-black/40">₹</span>
+                                                <input
+                                                    type="text"
+                                                    inputMode="decimal"
+                                                    value={ec.amount}
+                                                    onChange={(e) => {
+                                                        const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+                                                        setExtraCharges((prev) => prev.map((item) => item.id === ec.id ? { ...item, amount: v } : item));
+                                                    }}
+                                                    placeholder="0"
+                                                    className="w-24 text-right text-sm font-mono font-semibold text-black bg-black/[0.03] border border-black/8 rounded-lg px-2 py-1.5 outline-none focus:ring-1 focus:ring-black/10"
+                                                />
+                                            </div>
+                                            <button
+                                                onClick={() => setExtraCharges((prev) => prev.filter((item) => item.id !== ec.id))}
+                                                className="p-1 rounded-lg text-black/20 hover:text-red-500 transition-colors"
+                                                title="Remove"
+                                            >
+                                                <X className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    ))}
                                     <button
-                                        onClick={() => {
-                                            setFocusedInputId(null);
-                                            setFocusedSourceId(null);
-                                            setRefTreePath([]);
-                                        }}
-                                        className="p-1 rounded text-black/30 hover:text-black transition-colors"
-                                        title="Close"
+                                        onClick={() => setExtraCharges((prev) => [...prev, { id: Date.now().toString(), label: '', amount: '' }])}
+                                        className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-dashed border-black/15 hover:border-blue-300 hover:bg-blue-50/40 text-black/40 hover:text-blue-600 transition-all group"
                                     >
-                                        <X className="w-3 h-3" />
+                                        <Plus className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                                        <span className="text-sm font-semibold">Extra Charges</span>
                                     </button>
                                 </div>
 
-                                {/* Tree navigation */}
-                                {refTree && (
-                                    <div className="space-y-2">
-                                        {treeBreadcrumb.length > 0 && (
-                                            <div className="flex items-center gap-1 flex-wrap">
-                                                <button
-                                                    onClick={() => setRefTreePath([])}
-                                                    className="text-[10px] text-black/40 hover:text-black transition-colors"
-                                                >
-                                                    All
-                                                </button>
-                                                {treeBreadcrumb.map((bc, i) => (
-                                                    <span key={bc.id} className="flex items-center gap-1">
-                                                        <ChevronRight className="w-2.5 h-2.5 text-black/20" />
+                                {/* ═══ GRAND TOTAL ═══ */}
+                                <div className="rounded-2xl overflow-hidden border-2 border-emerald-200 bg-gradient-to-r from-emerald-50 to-emerald-50/30">
+                                    {/* Per-section subtotals when there are active charges or extra charges */}
+                                    {(activeCharges.length > 0 || extraCharges.some((ec) => parseFloat(ec.amount) > 0)) && (
+                                        <div className="px-5 pt-4 pb-2 space-y-1">
+                                            <div className="flex items-center justify-between text-sm">
+                                                <span className="text-emerald-700/70">{currentCalc.name}</span>
+                                                <span className="font-mono font-semibold text-emerald-600">
+                                                    ₹{mainResult ? mainResult.finalAmount.toFixed(2) : '0.00'}
+                                                </span>
+                                            </div>
+                                            {activeCharges.map((charge) => (
+                                                <div key={charge.id} className="flex items-center justify-between text-sm">
+                                                    <span className="text-emerald-700/70">{charge.name}</span>
+                                                    <span className="font-mono font-semibold text-emerald-600">
+                                                        ₹{chargeResults[charge.id] ? chargeResults[charge.id].finalAmount.toFixed(2) : '0.00'}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                            {extraCharges.filter((ec) => parseFloat(ec.amount) > 0).map((ec) => (
+                                                <div key={ec.id} className="flex items-center justify-between text-sm">
+                                                    <span className="text-emerald-700/70">{ec.label || 'Extra Charge'}</span>
+                                                    <span className="font-mono font-semibold text-emerald-600">
+                                                        ₹{parseFloat(ec.amount).toFixed(2)}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                            <div className="border-t border-emerald-200/60 my-1" />
+                                        </div>
+                                    )}
+
+                                    {/* Grand Total */}
+                                    <div className={`px-5 ${(activeCharges.length > 0 || extraCharges.some((ec) => parseFloat(ec.amount) > 0)) ? 'pt-1 pb-4' : 'py-4'} flex items-center justify-between`}>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-emerald-500 text-lg">🏆</span>
+                                            <span className="text-lg font-bold text-emerald-800">
+                                                Grand Total
+                                            </span>
+                                        </div>
+                                        <span className="text-xl font-mono font-bold text-emerald-700">
+                                            ₹{grandTotal.toFixed(2)}
+                                        </span>
+                                    </div>
+
+                                    {/* Quotation Actions */}
+                                    <div className="px-5 pb-4 flex items-center gap-2">
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); setShowQuotationModal(true); }}
+                                            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-black text-white text-sm font-semibold hover:bg-black/80 transition-all"
+                                        >
+                                            <FileText className="w-4 h-4" />
+                                            Download PDF
+                                        </button>
+                                        <button
+                                            onClick={(e) => { e.stopPropagation(); setShowQuotationModal(true); }}
+                                            className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-green-600 text-white text-sm font-semibold hover:bg-green-500 transition-all"
+                                        >
+                                            <MessageCircle className="w-4 h-4" />
+                                            WhatsApp
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Reference sidebar */}
+                    {focusedInputDef && focusedSourceId && (() => {
+                        const refItems = focusedInputDef.referenceItems || [];
+                        const refTree = focusedInputDef.refTree;
+                        const hasAnything = refItems.length > 0 || refTree;
+
+                        if (!hasAnything) return null;
+
+                        // Tree navigation
+                        let treeCurrentNodes: RefTreeNode[] = [];
+                        if (refTree) {
+                            let nodes = refTree.nodes;
+                            for (let i = 0; i < refTreePath.length; i++) {
+                                const found = nodes.find((n) => n.id === refTreePath[i]);
+                                if (found) {
+                                    nodes = found.children || [];
+                                } else break;
+                            }
+                            treeCurrentNodes = nodes;
+                        }
+
+                        const treeBreadcrumb: { id: string; name: string }[] = [];
+                        if (refTree) {
+                            let nodes = refTree.nodes;
+                            for (let i = 0; i < refTreePath.length; i++) {
+                                const found = nodes.find((n) => n.id === refTreePath[i]);
+                                if (found) {
+                                    treeBreadcrumb.push({ id: found.id, name: found.name || '...' });
+                                    nodes = found.children || [];
+                                } else break;
+                            }
+                        }
+
+                        // Determine which input state to read/write
+                        const isMainCalc = focusedSourceId === currentCalc?.id;
+                        const currentInputs = isMainCalc ? mainInputs : (chargeInputs[focusedSourceId] || {});
+                        const handleSelectValue = (val: string) => {
+                            if (isMainCalc) {
+                                setMainInputs((prev) => ({ ...prev, [focusedInputDef.key]: val }));
+                            } else {
+                                setChargeInput(focusedSourceId, focusedInputDef.key, val);
+                            }
+                        };
+
+                        return (
+                            <div className="w-64 shrink-0">
+                                <div className="glass rounded-2xl p-4 space-y-3 sticky top-20">
+                                    <div className="flex items-center justify-between">
+                                        <h3 className="text-sm font-semibold text-black">
+                                            {focusedInputDef.name} — Reference
+                                        </h3>
+                                        <button
+                                            onClick={() => {
+                                                setFocusedInputId(null);
+                                                setFocusedSourceId(null);
+                                                setRefTreePath([]);
+                                            }}
+                                            className="p-1 rounded text-black/30 hover:text-black transition-colors"
+                                            title="Close"
+                                        >
+                                            <X className="w-3 h-3" />
+                                        </button>
+                                    </div>
+
+                                    {/* Tree navigation */}
+                                    {refTree && (
+                                        <div className="space-y-2">
+                                            {treeBreadcrumb.length > 0 && (
+                                                <div className="flex items-center gap-1 flex-wrap">
+                                                    <button
+                                                        onClick={() => setRefTreePath([])}
+                                                        className="text-[10px] text-black/40 hover:text-black transition-colors"
+                                                    >
+                                                        All
+                                                    </button>
+                                                    {treeBreadcrumb.map((bc, i) => (
+                                                        <span key={bc.id} className="flex items-center gap-1">
+                                                            <ChevronRight className="w-2.5 h-2.5 text-black/20" />
+                                                            <button
+                                                                onClick={() => setRefTreePath(refTreePath.slice(0, i + 1))}
+                                                                className={`text-[10px] transition-colors ${i === treeBreadcrumb.length - 1
+                                                                    ? 'text-black font-semibold'
+                                                                    : 'text-black/40 hover:text-black'
+                                                                    }`}
+                                                            >
+                                                                {bc.name}
+                                                            </button>
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            )}
+
+                                            <div className="space-y-1">
+                                                {treeCurrentNodes.map((node) => {
+                                                    const isLeaf = !node.children || node.children.length === 0;
+                                                    const hasRate = !!node.rate;
+
+                                                    return (
                                                         <button
-                                                            onClick={() => setRefTreePath(refTreePath.slice(0, i + 1))}
-                                                            className={`text-[10px] transition-colors ${i === treeBreadcrumb.length - 1
-                                                                ? 'text-black font-semibold'
-                                                                : 'text-black/40 hover:text-black'
+                                                            key={node.id}
+                                                            onClick={() => {
+                                                                if (isLeaf && hasRate) {
+                                                                    handleSelectValue(node.rate!);
+                                                                } else if (!isLeaf) {
+                                                                    setRefTreePath([...refTreePath, node.id]);
+                                                                }
+                                                            }}
+                                                            disabled={isLeaf && !hasRate}
+                                                            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-colors ${isLeaf && hasRate && currentInputs[focusedInputDef.key] === node.rate
+                                                                ? 'bg-black/[0.06] ring-1 ring-black/10'
+                                                                : isLeaf && !hasRate
+                                                                    ? 'opacity-40 cursor-not-allowed'
+                                                                    : 'hover:bg-white'
                                                                 }`}
                                                         >
-                                                            {bc.name}
+                                                            <span className="text-black font-medium">
+                                                                {node.name || <span className="text-black/30 italic">Unnamed</span>}
+                                                            </span>
+                                                            {isLeaf ? (
+                                                                <span className="text-black font-mono font-semibold">
+                                                                    {hasRate ? `₹${node.rate}` : '—'}
+                                                                </span>
+                                                            ) : (
+                                                                <ChevronRight className="w-3.5 h-3.5 text-black/30" />
+                                                            )}
                                                         </button>
-                                                    </span>
-                                                ))}
+                                                    );
+                                                })}
                                             </div>
-                                        )}
+                                        </div>
+                                    )}
 
-                                        <div className="space-y-1">
-                                            {treeCurrentNodes.map((node) => {
-                                                const isLeaf = !node.children || node.children.length === 0;
-                                                const hasRate = !!node.rate;
-
-                                                return (
+                                    {/* Flat reference items */}
+                                    {!refTree && refItems.length > 0 && (
+                                        <>
+                                            <p className="text-[11px] text-black/40">
+                                                Click to fill {focusedInputDef.name}:
+                                            </p>
+                                            <div className="space-y-1">
+                                                {refItems.map((item) => (
                                                     <button
-                                                        key={node.id}
-                                                        onClick={() => {
-                                                            if (isLeaf && hasRate) {
-                                                                handleSelectValue(node.rate!);
-                                                            } else if (!isLeaf) {
-                                                                setRefTreePath([...refTreePath, node.id]);
-                                                            }
-                                                        }}
-                                                        disabled={isLeaf && !hasRate}
-                                                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-colors ${isLeaf && hasRate && currentInputs[focusedInputDef.key] === node.rate
+                                                        key={item.id}
+                                                        onClick={() => handleSelectValue(item.value)}
+                                                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-colors ${currentInputs[focusedInputDef.key] === item.value
                                                             ? 'bg-black/[0.06] ring-1 ring-black/10'
-                                                            : isLeaf && !hasRate
-                                                                ? 'opacity-40 cursor-not-allowed'
-                                                                : 'hover:bg-white'
+                                                            : 'hover:bg-white'
                                                             }`}
                                                     >
                                                         <span className="text-black font-medium">
-                                                            {node.name || <span className="text-black/30 italic">Unnamed</span>}
+                                                            {item.name || 'Unnamed'}
                                                         </span>
-                                                        {isLeaf ? (
-                                                            <span className="text-black font-mono font-semibold">
-                                                                {hasRate ? `₹${node.rate}` : '—'}
-                                                            </span>
-                                                        ) : (
-                                                            <ChevronRight className="w-3.5 h-3.5 text-black/30" />
-                                                        )}
+                                                        <span className="text-black/50 font-mono">
+                                                            ₹{item.value}
+                                                        </span>
                                                     </button>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-                                )}
-
-                                {/* Flat reference items */}
-                                {!refTree && refItems.length > 0 && (
-                                    <>
-                                        <p className="text-[11px] text-black/40">
-                                            Click to fill {focusedInputDef.name}:
-                                        </p>
-                                        <div className="space-y-1">
-                                            {refItems.map((item) => (
-                                                <button
-                                                    key={item.id}
-                                                    onClick={() => handleSelectValue(item.value)}
-                                                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-colors ${currentInputs[focusedInputDef.key] === item.value
-                                                        ? 'bg-black/[0.06] ring-1 ring-black/10'
-                                                        : 'hover:bg-white'
-                                                        }`}
-                                                >
-                                                    <span className="text-black font-medium">
-                                                        {item.name || 'Unnamed'}
-                                                    </span>
-                                                    <span className="text-black/50 font-mono">
-                                                        ₹{item.value}
-                                                    </span>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </>
-                                )}
+                                                ))}
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
                             </div>
-                        </div>
-                    );
-                })()}
+                        );
+                    })()}
+                </div>
             </div>
-        </div>
+
+            {/* ═══ QUOTATION MODAL ═══ */}
+            {
+                showQuotationModal && currentCalc && mainResult && (() => {
+                    // Build quotation line items — profit is merged into amounts
+                    const items: QuotationLineItem[] = [];
+
+                    // Main calculator
+                    items.push({
+                        label: currentCalc.name,
+                        amount: mainResult.afterProfit,       // profit merged
+                        gstPercent: parseFloat(currentCalc.gstPercent || '0') || 0,
+                        gstAmount: mainResult.gstAmount,
+                        finalAmount: mainResult.finalAmount,
+                    });
+
+                    // Active charges
+                    for (const charge of activeCharges) {
+                        const r = chargeResults[charge.id];
+                        if (r) {
+                            items.push({
+                                label: charge.name,
+                                amount: r.afterProfit,            // profit merged
+                                gstPercent: parseFloat(charge.gstPercent || '0') || 0,
+                                gstAmount: r.gstAmount,
+                                finalAmount: r.finalAmount,
+                            });
+                        }
+                    }
+
+                    // Extra charges (no GST on these)
+                    for (const ec of extraCharges) {
+                        const amt = parseFloat(ec.amount) || 0;
+                        if (amt > 0) {
+                            items.push({
+                                label: ec.label || 'Extra Charge',
+                                amount: amt,
+                                gstPercent: 0,
+                                gstAmount: 0,
+                                finalAmount: amt,
+                            });
+                        }
+                    }
+
+                    const qData: QuotationData = { items, grandTotal };
+
+                    return (
+                        <QuotationModal
+                            data={qData}
+                            onClose={() => setShowQuotationModal(false)}
+                        />
+                    );
+                })()
+            }
+        </>
     );
 }
 
