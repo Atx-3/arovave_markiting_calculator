@@ -13,6 +13,8 @@ import {
     AlertTriangle,
     FolderTree,
     Layers,
+    Eye,
+    EyeOff,
 } from 'lucide-react';
 import { useAppStore } from '../../stores/templateStore';
 import type { InputType, InputDefinition } from '../../types/calculator';
@@ -269,6 +271,11 @@ function InputCard({
                     </div>
                 </div>
 
+                {/* Hidden badge */}
+                {input.hidden && (
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-amber-500 bg-amber-50 px-1.5 py-0.5 rounded-md shrink-0">Hidden</span>
+                )}
+
 
 
                 {/* Fixed Value */}
@@ -313,6 +320,13 @@ function InputCard({
                         title="Delete"
                     >
                         <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                        onClick={() => onUpdate({ hidden: !input.hidden })}
+                        className={`p-1.5 rounded-lg transition-colors ${input.hidden ? 'text-amber-500 hover:text-amber-600' : 'text-black/20 hover:text-black hover:bg-black/5'}`}
+                        title={input.hidden ? 'Show on sales page' : 'Hide from sales page'}
+                    >
+                        {input.hidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                     </button>
                 </div>
 

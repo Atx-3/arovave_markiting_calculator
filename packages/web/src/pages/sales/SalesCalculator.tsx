@@ -4,16 +4,16 @@ import {
     ChevronRight,
     FolderOpen,
     ArrowLeft,
-    Plus,
     X,
     ChevronDown,
     ChevronUp,
+    Plus,
 } from 'lucide-react';
 import { useAppStore } from '../../stores/templateStore';
 import type { RefTreeNode, Calculator as CalcType, InputDefinition } from '../../types/calculator';
 
 // ═══════════════════════════════════════════════════════════════════════
-// SALES CALCULATOR — Multi-Charge Stackable System
+// SALES CALCULATOR — Single-calc-per-category + Additional Charges
 // ═══════════════════════════════════════════════════════════════════════
 
 export function SalesCalculator() {
@@ -23,128 +23,132 @@ export function SalesCalculator() {
         inputDefinitions,
         getCategoryChildren,
         getCategoryBreadcrumb,
-        getCalculatorsForCategory,
+        getCalculatorForCategory,
+        getChargesForCalculator,
         calculateResult,
     } = store;
 
     const [currentCategoryId, setCurrentCategoryId] = useState<string | null>(null);
-    // Multi-charge: track which calculators are active (first always active)
-    const [activeCalcIds, setActiveCalcIds] = useState<string[]>([]);
-    // Per-calculator input states
-    const [inputsByCalc, setInputsByCalc] = useState<Record<string, Record<string, string>>>({});
-    const [dropdownsByCalc, setDropdownsByCalc] = useState<Record<string, Record<string, string>>>({});
-    // Per-calculator collapse state
-    const [collapsedCalcs, setCollapsedCalcs] = useState<Record<string, boolean>>({});
+    // Main calculator input state
+    const [mainInputs, setMainInputs] = useState<Record<string, string>>({});
+    const [mainDropdowns, setMainDropdowns] = useState<Record<string, string>>({});
+    // Per-charge input state
+    const [chargeInputs, setChargeInputs] = useState<Record<string, Record<string, string>>>({});
+    const [chargeDropdowns, setChargeDropdowns] = useState<Record<string, Record<string, string>>>({});
+    // Which charges are active (user clicked the + button)
+    const [activeChargeIds, setActiveChargeIds] = useState<string[]>([]);
+    // Collapse state for charges
+    const [collapsedCharges, setCollapsedCharges] = useState<Record<string, boolean>>({});
     // Reference sidebar
     const [focusedInputId, setFocusedInputId] = useState<string | null>(null);
-    const [focusedCalcId, setFocusedCalcId] = useState<string | null>(null);
+    const [focusedSourceId, setFocusedSourceId] = useState<string | null>(null); // calc or charge id
     const [refTreePath, setRefTreePath] = useState<string[]>([]);
-    const [showAddCharge, setShowAddCharge] = useState(false);
 
     // Navigation
     const children = getCategoryChildren(currentCategoryId);
     const breadcrumb = currentCategoryId ? getCategoryBreadcrumb(currentCategoryId) : [];
+    const rootCategories = categories
+        .filter((c) => c.parentId === null)
+        .sort((a, b) => a.order - b.order);
 
-    // All calculators in this category
-    const categoryCalcs = currentCategoryId ? getCalculatorsForCategory(currentCategoryId) : [];
-    const activeCalcs = activeCalcIds
-        .map((id) => categoryCalcs.find((c) => c.id === id))
-        .filter(Boolean) as CalcType[];
-    const availableToAdd = categoryCalcs.filter((c) => !activeCalcIds.includes(c.id));
+    // Current calculator (single per category)
+    const currentCalc = currentCategoryId ? getCalculatorForCategory(currentCategoryId) : undefined;
+    // Charges linked to this calculator
+    const charges = currentCalc ? getChargesForCalculator(currentCalc.id) : [];
 
     const navigateTo = useCallback((id: string | null) => {
         setCurrentCategoryId(id);
-        setActiveCalcIds([]);
-        setInputsByCalc({});
-        setDropdownsByCalc({});
-        setCollapsedCalcs({});
+        setMainInputs({});
+        setMainDropdowns({});
+        setChargeInputs({});
+        setChargeDropdowns({});
+        setActiveChargeIds([]);
+        setCollapsedCharges({});
         setFocusedInputId(null);
-        setFocusedCalcId(null);
+        setFocusedSourceId(null);
         setRefTreePath([]);
-        setShowAddCharge(false);
-
-        // Auto-activate first calculator
-        if (id) {
-            const calcs = getCalculatorsForCategory(id);
-            if (calcs.length > 0) {
-                setActiveCalcIds([calcs[0].id]);
-            }
-        }
-    }, [getCalculatorsForCategory]);
-
-    const addCharge = useCallback((calcId: string) => {
-        setActiveCalcIds((prev) => [...prev, calcId]);
-        setShowAddCharge(false);
     }, []);
 
-    const removeCharge = useCallback((calcId: string) => {
-        setActiveCalcIds((prev) => prev.filter((id) => id !== calcId));
-        setInputsByCalc((prev) => { const next = { ...prev }; delete next[calcId]; return next; });
-        setDropdownsByCalc((prev) => { const next = { ...prev }; delete next[calcId]; return next; });
-        setCollapsedCalcs((prev) => { const next = { ...prev }; delete next[calcId]; return next; });
-    }, []);
-
-    const toggleCollapse = useCallback((calcId: string) => {
-        setCollapsedCalcs((prev) => ({ ...prev, [calcId]: !prev[calcId] }));
-    }, []);
-
-    const setCalcInput = useCallback((calcId: string, key: string, value: string) => {
-        setInputsByCalc((prev) => ({
+    const setChargeInput = useCallback((chargeId: string, key: string, value: string) => {
+        setChargeInputs((prev) => ({
             ...prev,
-            [calcId]: { ...(prev[calcId] || {}), [key]: value },
+            [chargeId]: { ...(prev[chargeId] || {}), [key]: value },
         }));
     }, []);
 
-    const setCalcDropdown = useCallback((calcId: string, key: string, value: string) => {
-        setDropdownsByCalc((prev) => ({
+    const setChargeDropdown = useCallback((chargeId: string, key: string, value: string) => {
+        setChargeDropdowns((prev) => ({
             ...prev,
-            [calcId]: { ...(prev[calcId] || {}), [key]: value },
+            [chargeId]: { ...(prev[chargeId] || {}), [key]: value },
         }));
     }, []);
 
-    // Compute result for each active calculator
-    const calcResults = useMemo(() => {
+    // ── Compute results ──
+
+    // Main calculator result
+    const mainResult = useMemo(() => {
+        if (!currentCalc) return null;
+        const result = calculateResult(currentCalc, mainInputs, mainDropdowns, []);
+        const grandTotalFormula = currentCalc.formulas.find((f) => f.isTotal);
+        const subtotal = grandTotalFormula
+            ? parseFloat(result.formulaResults[grandTotalFormula.key] || '0')
+            : parseFloat(result.total || '0');
+
+        const profitPct = parseFloat(currentCalc.profitPercent || '0') || 0;
+        const profitAmount = subtotal * (profitPct / 100);
+        const afterProfit = subtotal + profitAmount;
+        const gstPct = parseFloat(currentCalc.gstPercent || '0') || 0;
+        const gstAmount = afterProfit * (gstPct / 100);
+        const finalAmount = afterProfit + gstAmount;
+
+        return { ...result, subtotal, profitAmount, afterProfit, gstAmount, finalAmount };
+    }, [currentCalc, mainInputs, mainDropdowns, calculateResult]);
+
+    // Active charges (only compute results for activated ones)
+    const activeCharges = charges.filter((c) => activeChargeIds.includes(c.id));
+    const inactiveCharges = charges.filter((c) => !activeChargeIds.includes(c.id));
+
+    // Per-charge results
+    const chargeResults = useMemo(() => {
         const results: Record<string, { formulaResults: Record<string, string>; total: string; subtotal: number; profitAmount: number; afterProfit: number; gstAmount: number; finalAmount: number }> = {};
-        for (const calc of activeCalcs) {
-            const inputs = inputsByCalc[calc.id] || {};
-            const dropdowns = dropdownsByCalc[calc.id] || {};
-            const result = calculateResult(calc, inputs, dropdowns, []);
+        for (const charge of activeCharges) {
+            const inputs = chargeInputs[charge.id] || {};
+            const dropdowns = chargeDropdowns[charge.id] || {};
+            const result = calculateResult(charge, inputs, dropdowns, []);
 
-            // Calculate subtotal, profit, GST flow
-            const grandTotalFormula = calc.formulas.find((f) => f.isTotal);
+            const grandTotalFormula = charge.formulas.find((f) => f.isTotal);
             const subtotal = grandTotalFormula
                 ? parseFloat(result.formulaResults[grandTotalFormula.key] || '0')
                 : parseFloat(result.total || '0');
 
-            const profitPct = parseFloat(calc.profitPercent || '0') || 0;
+            const profitPct = parseFloat(charge.profitPercent || '0') || 0;
             const profitAmount = subtotal * (profitPct / 100);
             const afterProfit = subtotal + profitAmount;
-
-            const gstPct = parseFloat(calc.gstPercent || '0') || 0;
+            const gstPct = parseFloat(charge.gstPercent || '0') || 0;
             const gstAmount = afterProfit * (gstPct / 100);
             const finalAmount = afterProfit + gstAmount;
 
-            results[calc.id] = {
-                ...result,
-                subtotal,
-                profitAmount,
-                afterProfit,
-                gstAmount,
-                finalAmount,
-            };
+            results[charge.id] = { ...result, subtotal, profitAmount, afterProfit, gstAmount, finalAmount };
         }
         return results;
-    }, [activeCalcs, inputsByCalc, dropdownsByCalc, calculateResult]);
+    }, [activeCharges, chargeInputs, chargeDropdowns, calculateResult]);
 
-    // Grand total = sum of all calculator final amounts
+    // Grand total = main + all charges
     const grandTotal = useMemo(() => {
-        return Object.values(calcResults).reduce((sum, r) => sum + r.finalAmount, 0);
-    }, [calcResults]);
+        let total = mainResult?.finalAmount || 0;
+        for (const r of Object.values(chargeResults)) {
+            total += r.finalAmount;
+        }
+        return total;
+    }, [mainResult, chargeResults]);
 
     // Reference sidebar
     const focusedInputDef = focusedInputId
         ? inputDefinitions.find((i) => i.id === focusedInputId)
         : null;
+
+    // Which categories to show at current level
+    const displayChildren = currentCategoryId ? children : rootCategories;
 
     return (
         <div className="space-y-6 animate-fade-in">
@@ -188,185 +192,174 @@ export function SalesCalculator() {
             <div className="flex gap-6">
                 {/* Main content */}
                 <div className="flex-1 space-y-4">
-                    {/* Category browser */}
-                    {activeCalcs.length === 0 && (
-                        <>
-                            {currentCategoryId && (
-                                <button
-                                    onClick={() => {
-                                        const current = categories.find((c) => c.id === currentCategoryId);
-                                        navigateTo(current?.parentId || null);
-                                    }}
-                                    className="flex items-center gap-1.5 text-sm text-black/50 hover:text-black transition-colors"
-                                >
-                                    <ArrowLeft className="w-3 h-3" />
-                                    Back
-                                </button>
-                            )}
-
-                            {children.length === 0 && !currentCategoryId && categories.length === 0 && (
-                                <div className="glass rounded-2xl p-10 text-center">
-                                    <Calculator className="w-12 h-12 text-black/20 mx-auto mb-3" />
-                                    <p className="text-black/40 text-base">
-                                        No categories yet. Ask your admin to create product categories.
-                                    </p>
-                                </div>
-                            )}
-
-                            {children.length > 0 && (
-                                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                                    {children.map((cat) => {
-                                        const calcs = getCalculatorsForCategory(cat.id);
-                                        const hasCalc = calcs.length > 0;
-                                        const subChildren = getCategoryChildren(cat.id);
-
-                                        return (
-                                            <button
-                                                key={cat.id}
-                                                onClick={() => navigateTo(cat.id)}
-                                                className="glass rounded-2xl p-4 text-left hover:border-black/15 border border-transparent transition-all duration-200 group"
-                                            >
-                                                {hasCalc ? (
-                                                    <Calculator className="w-6 h-6 text-black mb-2 group-hover:scale-110 transition-transform" />
-                                                ) : (
-                                                    <FolderOpen className="w-6 h-6 text-black/50 mb-2 group-hover:scale-110 transition-transform" />
-                                                )}
-                                                <span className="text-base font-semibold text-black block">{cat.name}</span>
-                                                <span className="text-[11px] text-black/40 mt-0.5 block">
-                                                    {hasCalc
-                                                        ? `${calcs.length} calculator${calcs.length > 1 ? 's' : ''}`
-                                                        : `${subChildren.length} sub-categories`}
-                                                </span>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-                            )}
-                        </>
+                    {/* Back button */}
+                    {currentCategoryId && (
+                        <button
+                            onClick={() => {
+                                const current = categories.find((c) => c.id === currentCategoryId);
+                                navigateTo(current?.parentId || null);
+                            }}
+                            className="flex items-center gap-1.5 text-sm text-black/50 hover:text-black transition-colors"
+                        >
+                            <ArrowLeft className="w-3 h-3" />
+                            Back
+                        </button>
                     )}
 
-                    {/* Calculator sections */}
-                    {activeCalcs.length > 0 && (
-                        <div className="space-y-4">
-                            <button
-                                onClick={() => {
-                                    const current = categories.find((c) => c.id === currentCategoryId);
-                                    navigateTo(current?.parentId || null);
-                                }}
-                                className="flex items-center gap-1.5 text-sm text-black/50 hover:text-black transition-colors"
-                            >
-                                <ArrowLeft className="w-3 h-3" />
-                                Back to categories
-                            </button>
+                    {/* Category browser — show when there are subcategories */}
+                    {displayChildren.length > 0 && (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                            {displayChildren.map((cat) => {
+                                const calcs = store.getCalculatorsForCategory(cat.id);
+                                const hasCalc = calcs.length > 0;
+                                const subChildren = getCategoryChildren(cat.id);
 
-                            {/* Render each active calculator as a section */}
-                            {activeCalcs.map((calc, idx) => (
-                                <CalculatorSection
-                                    key={calc.id}
-                                    calc={calc}
-                                    isFirst={idx === 0}
-                                    isCollapsed={collapsedCalcs[calc.id] || false}
-                                    inputs={inputsByCalc[calc.id] || {}}
-                                    dropdowns={dropdownsByCalc[calc.id] || {}}
-                                    result={calcResults[calc.id]}
-                                    inputDefinitions={inputDefinitions}
-                                    onSetInput={(key, val) => setCalcInput(calc.id, key, val)}
-                                    onSetDropdown={(key, val) => setCalcDropdown(calc.id, key, val)}
-                                    onToggleCollapse={() => toggleCollapse(calc.id)}
-                                    onRemove={idx > 0 ? () => removeCharge(calc.id) : undefined}
-                                    onFocusInput={(inputId) => {
-                                        setFocusedInputId(inputId);
-                                        setFocusedCalcId(calc.id);
-                                        setRefTreePath([]);
-                                    }}
-                                    focusedInputId={focusedCalcId === calc.id ? focusedInputId : null}
-                                />
-                            ))}
-
-                            {/* Add Charge button */}
-                            {availableToAdd.length > 0 && (
-                                <div className="relative">
+                                return (
                                     <button
-                                        onClick={() => setShowAddCharge(!showAddCharge)}
-                                        className="w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl border-2 border-dashed border-black/10 text-sm text-black/40 hover:text-black hover:border-black/20 font-semibold transition-all hover:bg-black/[0.02]"
+                                        key={cat.id}
+                                        onClick={() => navigateTo(cat.id)}
+                                        className="glass rounded-2xl p-4 text-left hover:border-black/15 border border-transparent transition-all duration-200 group"
                                     >
-                                        <Plus className="w-4 h-4" />
-                                        Add Charge
+                                        {hasCalc ? (
+                                            <Calculator className="w-6 h-6 text-black mb-2 group-hover:scale-110 transition-transform" />
+                                        ) : (
+                                            <FolderOpen className="w-6 h-6 text-black/50 mb-2 group-hover:scale-110 transition-transform" />
+                                        )}
+                                        <span className="text-base font-semibold text-black block">{cat.name}</span>
+                                        <span className="text-[11px] text-black/40 mt-0.5 block">
+                                            {hasCalc
+                                                ? `${calcs.length} calculator${calcs.length > 1 ? 's' : ''}`
+                                                : `${subChildren.length} sub-categories`}
+                                        </span>
                                     </button>
+                                );
+                            })}
+                        </div>
+                    )}
 
-                                    {showAddCharge && (
-                                        <>
-                                            <div className="fixed inset-0 z-40" onClick={() => setShowAddCharge(false)} />
-                                            <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 z-50 bg-white rounded-2xl shadow-xl shadow-black/10 border border-black/8 p-2 min-w-[240px] animate-slide-up">
-                                                <p className="text-[10px] text-black/30 font-semibold uppercase tracking-wider px-3 py-1.5">
-                                                    Available Calculators
-                                                </p>
-                                                {availableToAdd.map((calc) => (
-                                                    <button
-                                                        key={calc.id}
-                                                        onClick={() => addCharge(calc.id)}
-                                                        className="w-full flex items-center gap-3 px-4 py-3 rounded-xl hover:bg-black/[0.03] transition-colors text-left group"
-                                                    >
-                                                        <div className="p-1.5 rounded-lg border bg-blue-50 text-blue-600 border-blue-200">
-                                                            <Calculator className="w-3.5 h-3.5" />
-                                                        </div>
-                                                        <div>
-                                                            <span className="text-sm font-semibold text-black block">
-                                                                {calc.name}
-                                                            </span>
-                                                            <span className="text-[11px] text-black/40">
-                                                                {calc.formulas.length} formula{calc.formulas.length !== 1 ? 's' : ''}
-                                                            </span>
-                                                        </div>
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </>
-                                    )}
+                    {/* Empty state */}
+                    {displayChildren.length === 0 && !currentCalc && (
+                        <div className="glass rounded-2xl p-10 text-center">
+                            <Calculator className="w-12 h-12 text-black/20 mx-auto mb-3" />
+                            <p className="text-black/40 text-base">
+                                {currentCategoryId
+                                    ? 'No calculator set up for this category yet.'
+                                    : 'No categories yet. Ask your admin to create product categories.'}
+                            </p>
+                        </div>
+                    )}
+
+                    {/* ═══ MAIN CALCULATOR ═══ */}
+                    {currentCalc && displayChildren.length === 0 && (
+                        <div className="space-y-4">
+                            {/* Main calculator section */}
+                            <CalcSection
+                                calc={currentCalc}
+                                label={currentCalc.name}
+                                isMain={true}
+                                isCollapsed={false}
+                                inputs={mainInputs}
+                                dropdowns={mainDropdowns}
+                                result={mainResult}
+                                inputDefinitions={inputDefinitions}
+                                onSetInput={(key, val) => setMainInputs((prev) => ({ ...prev, [key]: val }))}
+                                onSetDropdown={(key, val) => setMainDropdowns((prev) => ({ ...prev, [key]: val }))}
+                                onFocusInput={(inputId) => {
+                                    setFocusedInputId(inputId);
+                                    setFocusedSourceId(currentCalc.id);
+                                    setRefTreePath([]);
+                                }}
+                                focusedInputId={focusedSourceId === currentCalc.id ? focusedInputId : null}
+                            />
+
+                            {/* ═══ ACTIVE CHARGES (expanded) ═══ */}
+                            {activeCharges.map((charge) => {
+                                const isCollapsed = collapsedCharges[charge.id] || false;
+                                const result = chargeResults[charge.id];
+
+                                return (
+                                    <CalcSection
+                                        key={charge.id}
+                                        calc={charge}
+                                        label={charge.name}
+                                        isMain={false}
+                                        isCollapsed={isCollapsed}
+                                        inputs={chargeInputs[charge.id] || {}}
+                                        dropdowns={chargeDropdowns[charge.id] || {}}
+                                        result={result}
+                                        inputDefinitions={inputDefinitions}
+                                        onSetInput={(key, val) => setChargeInput(charge.id, key, val)}
+                                        onSetDropdown={(key, val) => setChargeDropdown(charge.id, key, val)}
+                                        onToggleCollapse={() => setCollapsedCharges((prev) => ({ ...prev, [charge.id]: !prev[charge.id] }))}
+                                        onRemove={() => setActiveChargeIds((prev) => prev.filter((id) => id !== charge.id))}
+                                        onFocusInput={(inputId) => {
+                                            setFocusedInputId(inputId);
+                                            setFocusedSourceId(charge.id);
+                                            setRefTreePath([]);
+                                        }}
+                                        focusedInputId={focusedSourceId === charge.id ? focusedInputId : null}
+                                    />
+                                );
+                            })}
+
+                            {/* ═══ INACTIVE CHARGES (+ buttons) ═══ */}
+                            {inactiveCharges.length > 0 && (
+                                <div className="flex flex-wrap gap-2">
+                                    {inactiveCharges.map((charge) => (
+                                        <button
+                                            key={charge.id}
+                                            onClick={() => setActiveChargeIds((prev) => [...prev, charge.id])}
+                                            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-dashed border-black/15 hover:border-blue-300 hover:bg-blue-50/40 text-black/40 hover:text-blue-600 transition-all group"
+                                        >
+                                            <Plus className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
+                                            <span className="text-sm font-semibold">{charge.name}</span>
+                                        </button>
+                                    ))}
                                 </div>
                             )}
 
                             {/* ═══ GRAND TOTAL ═══ */}
-                            {activeCalcs.length > 0 && (
-                                <div className="rounded-2xl overflow-hidden border-2 border-emerald-200 bg-gradient-to-r from-emerald-50 to-emerald-50/30">
-                                    {/* Per-calculator subtotals summary */}
-                                    {activeCalcs.length > 1 && (
-                                        <div className="px-5 pt-4 pb-2 space-y-1">
-                                            {activeCalcs.map((calc) => {
-                                                const r = calcResults[calc.id];
-                                                return (
-                                                    <div key={calc.id} className="flex items-center justify-between text-sm">
-                                                        <span className="text-emerald-700/70">{calc.name}</span>
-                                                        <span className="font-mono font-semibold text-emerald-600">
-                                                            ₹{r ? r.finalAmount.toFixed(2) : '0.00'}
-                                                        </span>
-                                                    </div>
-                                                );
-                                            })}
-                                            <div className="border-t border-emerald-200/60 my-1" />
-                                        </div>
-                                    )}
-
-                                    {/* Grand Total */}
-                                    <div className={`px-5 ${activeCalcs.length > 1 ? 'pt-1 pb-4' : 'py-4'} flex items-center justify-between`}>
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-emerald-500 text-lg">🏆</span>
-                                            <span className="text-lg font-bold text-emerald-800">
-                                                Grand Total
+                            <div className="rounded-2xl overflow-hidden border-2 border-emerald-200 bg-gradient-to-r from-emerald-50 to-emerald-50/30">
+                                {/* Per-section subtotals when there are active charges */}
+                                {activeCharges.length > 0 && (
+                                    <div className="px-5 pt-4 pb-2 space-y-1">
+                                        <div className="flex items-center justify-between text-sm">
+                                            <span className="text-emerald-700/70">{currentCalc.name}</span>
+                                            <span className="font-mono font-semibold text-emerald-600">
+                                                ₹{mainResult ? mainResult.finalAmount.toFixed(2) : '0.00'}
                                             </span>
                                         </div>
-                                        <span className="text-xl font-mono font-bold text-emerald-700">
-                                            ₹{grandTotal.toFixed(2)}
+                                        {activeCharges.map((charge) => (
+                                            <div key={charge.id} className="flex items-center justify-between text-sm">
+                                                <span className="text-emerald-700/70">{charge.name}</span>
+                                                <span className="font-mono font-semibold text-emerald-600">
+                                                    ₹{chargeResults[charge.id] ? chargeResults[charge.id].finalAmount.toFixed(2) : '0.00'}
+                                                </span>
+                                            </div>
+                                        ))}
+                                        <div className="border-t border-emerald-200/60 my-1" />
+                                    </div>
+                                )}
+
+                                {/* Grand Total */}
+                                <div className={`px-5 ${activeCharges.length > 0 ? 'pt-1 pb-4' : 'py-4'} flex items-center justify-between`}>
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-emerald-500 text-lg">🏆</span>
+                                        <span className="text-lg font-bold text-emerald-800">
+                                            Grand Total
                                         </span>
                                     </div>
+                                    <span className="text-xl font-mono font-bold text-emerald-700">
+                                        ₹{grandTotal.toFixed(2)}
+                                    </span>
                                 </div>
-                            )}
+                            </div>
                         </div>
                     )}
                 </div>
 
                 {/* Reference sidebar */}
-                {focusedInputDef && focusedCalcId && (() => {
+                {focusedInputDef && focusedSourceId && (() => {
                     const refItems = focusedInputDef.referenceItems || [];
                     const refTree = focusedInputDef.refTree;
                     const hasAnything = refItems.length > 0 || refTree;
@@ -398,6 +391,17 @@ export function SalesCalculator() {
                         }
                     }
 
+                    // Determine which input state to read/write
+                    const isMainCalc = focusedSourceId === currentCalc?.id;
+                    const currentInputs = isMainCalc ? mainInputs : (chargeInputs[focusedSourceId] || {});
+                    const handleSelectValue = (val: string) => {
+                        if (isMainCalc) {
+                            setMainInputs((prev) => ({ ...prev, [focusedInputDef.key]: val }));
+                        } else {
+                            setChargeInput(focusedSourceId, focusedInputDef.key, val);
+                        }
+                    };
+
                     return (
                         <div className="w-64 shrink-0">
                             <div className="glass rounded-2xl p-4 space-y-3 sticky top-20">
@@ -408,7 +412,7 @@ export function SalesCalculator() {
                                     <button
                                         onClick={() => {
                                             setFocusedInputId(null);
-                                            setFocusedCalcId(null);
+                                            setFocusedSourceId(null);
                                             setRefTreePath([]);
                                         }}
                                         className="p-1 rounded text-black/30 hover:text-black transition-colors"
@@ -455,14 +459,14 @@ export function SalesCalculator() {
                                                     <button
                                                         key={node.id}
                                                         onClick={() => {
-                                                            if (isLeaf && hasRate && focusedCalcId) {
-                                                                setCalcInput(focusedCalcId, focusedInputDef.key, node.rate!);
+                                                            if (isLeaf && hasRate) {
+                                                                handleSelectValue(node.rate!);
                                                             } else if (!isLeaf) {
                                                                 setRefTreePath([...refTreePath, node.id]);
                                                             }
                                                         }}
                                                         disabled={isLeaf && !hasRate}
-                                                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-colors ${isLeaf && hasRate && (inputsByCalc[focusedCalcId || ''] || {})[focusedInputDef.key] === node.rate
+                                                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-colors ${isLeaf && hasRate && currentInputs[focusedInputDef.key] === node.rate
                                                             ? 'bg-black/[0.06] ring-1 ring-black/10'
                                                             : isLeaf && !hasRate
                                                                 ? 'opacity-40 cursor-not-allowed'
@@ -496,12 +500,8 @@ export function SalesCalculator() {
                                             {refItems.map((item) => (
                                                 <button
                                                     key={item.id}
-                                                    onClick={() => {
-                                                        if (focusedCalcId) {
-                                                            setCalcInput(focusedCalcId, focusedInputDef.key, item.value);
-                                                        }
-                                                    }}
-                                                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-colors ${(inputsByCalc[focusedCalcId || ''] || {})[focusedInputDef.key] === item.value
+                                                    onClick={() => handleSelectValue(item.value)}
+                                                    className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-colors ${currentInputs[focusedInputDef.key] === item.value
                                                         ? 'bg-black/[0.06] ring-1 ring-black/10'
                                                         : 'hover:bg-white'
                                                         }`}
@@ -527,12 +527,13 @@ export function SalesCalculator() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// CALCULATOR SECTION — One charge section with inputs, formulas, breakdown
+// CALCULATOR SECTION — Renders inputs + formulas + breakdown for one calc/charge
 // ═══════════════════════════════════════════════════════════════════════
 
-function CalculatorSection({
+function CalcSection({
     calc,
-    isFirst,
+    label,
+    isMain,
     isCollapsed,
     inputs,
     dropdowns,
@@ -546,7 +547,8 @@ function CalculatorSection({
     focusedInputId,
 }: {
     calc: CalcType;
-    isFirst: boolean;
+    label: string;
+    isMain: boolean;
     isCollapsed: boolean;
     inputs: Record<string, string>;
     dropdowns: Record<string, string>;
@@ -558,11 +560,11 @@ function CalculatorSection({
         afterProfit: number;
         gstAmount: number;
         finalAmount: number;
-    };
+    } | null;
     inputDefinitions: InputDefinition[];
     onSetInput: (key: string, val: string) => void;
     onSetDropdown: (key: string, val: string) => void;
-    onToggleCollapse: () => void;
+    onToggleCollapse?: () => void;
     onRemove?: () => void;
     onFocusInput: (id: string) => void;
     focusedInputId: string | null;
@@ -573,56 +575,64 @@ function CalculatorSection({
 
     const sortedFormulas = [...calc.formulas].sort((a, b) => a.order - b.order);
     const grandTotalFormula = sortedFormulas.find((f) => f.isTotal);
-    const regularFormulas = sortedFormulas.filter((f) => !f.isTotal);
+    const regularFormulas = sortedFormulas.filter((f) => !f.isTotal && !f.hidden);
     const profitPct = parseFloat(calc.profitPercent || '0') || 0;
     const gstPct = parseFloat(calc.gstPercent || '0') || 0;
+
+    // Filter hidden inputs from display (but their values still participate in calculations)
+    const visibleInputDefs = usedInputDefs.filter((i) => !i.hidden);
 
     return (
         <div className="glass rounded-2xl overflow-hidden">
             {/* Section Header */}
             <div
-                className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors ${isFirst ? 'bg-black/[0.02]' : 'bg-blue-50/50'
+                className={`flex items-center gap-3 px-4 py-3 transition-colors ${isMain
+                    ? 'bg-black/[0.02]'
+                    : 'bg-blue-50/50 cursor-pointer'
                     }`}
-                onClick={onToggleCollapse}
+                onClick={!isMain ? onToggleCollapse : undefined}
             >
-                <div className={`p-1.5 rounded-lg border ${isFirst ? 'bg-black/5 border-black/10 text-black/60' : 'bg-blue-50 border-blue-200 text-blue-600'}`}>
+                <div className={`p-1.5 rounded-lg border ${isMain
+                    ? 'bg-black/5 border-black/10 text-black/60'
+                    : 'bg-blue-50 border-blue-200 text-blue-600'
+                    }`}>
                     <Calculator className="w-3.5 h-3.5" />
                 </div>
-                <h2 className="text-base font-semibold text-black flex-1">{calc.name}</h2>
+                <h2 className="text-base font-semibold text-black flex-1">{label}</h2>
 
-                {/* Subtotal badge */}
-                {result && (
+                {/* Subtotal badge for charges */}
+                {!isMain && result && (
                     <span className="text-sm font-mono font-semibold text-black/60">
                         ₹{result.finalAmount.toFixed(2)}
                     </span>
                 )}
 
-                {/* Collapse/Remove actions */}
-                <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                    {onRemove && (
-                        <button
-                            onClick={onRemove}
-                            className="p-1.5 rounded-lg text-black/20 hover:text-red-500 hover:bg-red-50 transition-colors"
-                            title="Remove charge"
-                        >
-                            <X className="w-3.5 h-3.5" />
-                        </button>
-                    )}
-                </div>
-
-                {isCollapsed ? (
-                    <ChevronDown className="w-4 h-4 text-black/20" />
-                ) : (
-                    <ChevronUp className="w-4 h-4 text-black/20" />
+                {!isMain && (
+                    <>
+                        {isCollapsed ? (
+                            <ChevronDown className="w-4 h-4 text-black/20" />
+                        ) : (
+                            <ChevronUp className="w-4 h-4 text-black/20" />
+                        )}
+                        {onRemove && (
+                            <button
+                                onClick={(e) => { e.stopPropagation(); onRemove(); }}
+                                className="p-1 rounded-lg text-black/20 hover:text-red-500 transition-colors"
+                                title="Remove charge"
+                            >
+                                <X className="w-3.5 h-3.5" />
+                            </button>
+                        )}
+                    </>
                 )}
             </div>
 
             {/* Section Content */}
             {!isCollapsed && (
                 <div className="animate-slide-up">
-                    {/* Input fields */}
+                    {/* Input fields — only visible ones */}
                     <div className="divide-y divide-black/5">
-                        {usedInputDefs.map((inputDef) => (
+                        {visibleInputDefs.map((inputDef) => (
                             <div
                                 key={inputDef.id}
                                 className="px-4 py-3 flex items-center justify-between gap-4"
@@ -741,11 +751,11 @@ function CalculatorSection({
                                         </div>
                                     )}
 
-                                    {/* Section total */}
+                                    {/* Section total (only show when profit or GST is set) */}
                                     {(profitPct > 0 || gstPct > 0) && (
                                         <div className="px-4 py-2 flex items-center justify-between border-t border-black/5">
                                             <span className="text-sm font-bold text-black/70">
-                                                {calc.name} Total
+                                                {label} Total
                                             </span>
                                             <span className="text-sm font-mono font-bold text-black">
                                                 ₹{result.finalAmount.toFixed(2)}

@@ -60,6 +60,7 @@ export interface InputDefinition {
     order: number;
     groupId?: string;
     isRequired?: boolean;
+    hidden?: boolean;       // hidden from sales page but still used in calculations
 }
 
 // ─── Input Groups ─────────────────────────────────────────────────────
@@ -86,6 +87,7 @@ export interface CalculatorFormula {
     key: string;
     tokens: FormulaToken[];
     isTotal?: boolean;
+    hidden?: boolean;       // hidden from sales page but still contributes to totals
     order: number;
 }
 
@@ -109,6 +111,8 @@ export interface Calculator {
     usedInputIds: string[];
     profitPercent?: string; // Profit % added on top of subtotal
     gstPercent?: string;    // GST % added on top of (subtotal + profit)
+    isCharge?: boolean;     // true = this is an additional charge, not a standalone calculator
+    parentCalcId?: string;  // links charge to its parent calculator
 }
 
 // ─── User Calculation State (Sales Side) ──────────────────────────────

@@ -76,11 +76,16 @@ interface AppStore {
     getCalculatorForCategory: (categoryId: string) => Calculator | undefined;
     getCalculatorsForCategory: (categoryId: string) => Calculator[];
 
+    // ── Additional Charges (linked to a parent calculator) ──
+    createCharge: (parentCalcId: string, name: string) => string;
+    getChargesForCalculator: (calcId: string) => Calculator[];
+
     // ── Calculator Formulas ──
     addFormula: (calcId: string) => string;
     removeFormula: (calcId: string, formulaId: string) => void;
     updateFormula: (calcId: string, formulaId: string, updates: Partial<CalculatorFormula>) => void;
     setFormulaTokens: (calcId: string, formulaId: string, tokens: FormulaToken[]) => void;
+    insertFormulaToken: (calcId: string, formulaId: string, index: number, token: FormulaToken) => void;
     moveFormula: (calcId: string, formulaId: string, direction: 'up' | 'down') => void;
 
     // ── Calculator Used Inputs ──
@@ -417,11 +422,41 @@ export const useAppStore = create<AppStore>()(
             },
 
             getCalculatorForCategory(categoryId) {
-                return get().calculators.find((c) => c.categoryId === categoryId);
+                return get().calculators.find((c) => c.categoryId === categoryId && !c.isCharge);
             },
 
             getCalculatorsForCategory(categoryId) {
-                return get().calculators.filter((c) => c.categoryId === categoryId);
+                return get().calculators.filter((c) => c.categoryId === categoryId && !c.isCharge);
+            },
+
+            // ══════════════════════════════════════════════════════════════════
+            // ADDITIONAL CHARGES (linked to a parent calculator)
+            // ══════════════════════════════════════════════════════════════════
+
+            createCharge(parentCalcId, name) {
+                const parent = get().calculators.find((c) => c.id === parentCalcId);
+                if (!parent) return '';
+                const id = uid();
+                set({
+                    calculators: [
+                        ...get().calculators,
+                        {
+                            id,
+                            name,
+                            categoryId: parent.categoryId,
+                            formulas: [],
+                            localRates: [],
+                            usedInputIds: [],
+                            isCharge: true,
+                            parentCalcId,
+                        },
+                    ],
+                });
+                return id;
+            },
+
+            getChargesForCalculator(calcId) {
+                return get().calculators.filter((c) => c.isCharge && c.parentCalcId === calcId);
             },
 
             // ══════════════════════════════════════════════════════════════════
@@ -488,6 +523,23 @@ export const useAppStore = create<AppStore>()(
                             formulas: c.formulas.map((f) =>
                                 f.id === formulaId ? { ...f, tokens } : f,
                             ),
+                        };
+                    }),
+                });
+            },
+
+            insertFormulaToken(calcId, formulaId, index, token) {
+                set({
+                    calculators: get().calculators.map((c) => {
+                        if (c.id !== calcId) return c;
+                        return {
+                            ...c,
+                            formulas: c.formulas.map((f) => {
+                                if (f.id !== formulaId) return f;
+                                const newTokens = [...f.tokens];
+                                newTokens.splice(index, 0, token);
+                                return { ...f, tokens: newTokens };
+                            }),
                         };
                     }),
                 });

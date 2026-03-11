@@ -201,14 +201,6 @@ export function AdminPanel() {
                                             </span>
                                         )}
                                     </div>
-                                    <button
-                                        onClick={handleCreateCalculator}
-                                        className="text-xs text-black/40 hover:text-black font-semibold flex items-center gap-1.5 transition-colors px-3 py-1.5 rounded-xl hover:bg-black/[0.03]"
-                                        title="Create a new calculator"
-                                    >
-                                        <Plus className="w-3 h-3" />
-                                        New Calculator
-                                    </button>
                                 </div>
 
                                 {/* Calculator Tabs (when multiple exist) */}
@@ -359,6 +351,9 @@ export function AdminPanel() {
 
                                         {/* Builder */}
                                         <DragDropCalculatorBuilder calculatorId={selectedCalc.id} />
+
+                                        {/* ═══ Additional Charges ═══ */}
+                                        <AdditionalChargesSection parentCalcId={selectedCalc.id} />
                                     </div>
                                 ) : categoryCalcs.length === 0 ? (
                                     <div className="text-center py-12">
@@ -508,6 +503,190 @@ function CascadingCategorySelector({
                     })}
                 </div>
             ))}
+        </div>
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// ADDITIONAL CHARGES SECTION
+// ═══════════════════════════════════════════════════════════════════════
+
+function AdditionalChargesSection({ parentCalcId }: { parentCalcId: string }) {
+    const store = useAppStore();
+    const {
+        createCharge,
+        getChargesForCalculator,
+        deleteCalculator,
+        updateCalculator,
+    } = store;
+
+    const charges = getChargesForCalculator(parentCalcId);
+
+    const [expandedChargeId, setExpandedChargeId] = useState<string | null>(null);
+    const [editingChargeId, setEditingChargeId] = useState<string | null>(null);
+    const [chargeNameDraft, setChargeNameDraft] = useState('');
+    const [showNewChargeInput, setShowNewChargeInput] = useState(false);
+    const [newChargeName, setNewChargeName] = useState('');
+
+    const handleAddCharge = () => {
+        if (!newChargeName.trim()) return;
+        const id = createCharge(parentCalcId, newChargeName.trim());
+        setNewChargeName('');
+        setShowNewChargeInput(false);
+        if (id) setExpandedChargeId(id);
+    };
+
+    const handleStartRename = (charge: { id: string; name: string }) => {
+        setEditingChargeId(charge.id);
+        setChargeNameDraft(charge.name);
+    };
+
+    const handleCommitRename = (chargeId: string) => {
+        if (chargeNameDraft.trim()) {
+            updateCalculator(chargeId, { name: chargeNameDraft.trim() });
+        }
+        setEditingChargeId(null);
+    };
+
+    return (
+        <div className="mt-6 space-y-3">
+            {/* Charge list */}
+            {charges.map((charge) => {
+                const isExpanded = expandedChargeId === charge.id;
+                const isEditing = editingChargeId === charge.id;
+
+                return (
+                    <div
+                        key={charge.id}
+                        className={`rounded-2xl border transition-all ${isExpanded
+                            ? 'border-blue-200/60 bg-blue-50/20 shadow-md'
+                            : 'border-black/8 bg-white hover:border-black/12'
+                            }`}
+                    >
+                        {/* Charge header */}
+                        <div
+                            className="flex items-center gap-3 px-4 py-3 cursor-pointer"
+                            onClick={() => setExpandedChargeId(isExpanded ? null : charge.id)}
+                        >
+                            <div className="p-1 rounded-md bg-blue-100 text-blue-600">
+                                <Calculator className="w-3 h-3" />
+                            </div>
+
+                            {isEditing ? (
+                                <div className="flex items-center gap-1.5 flex-1" onClick={(e) => e.stopPropagation()}>
+                                    <input
+                                        type="text"
+                                        value={chargeNameDraft}
+                                        onChange={(e) => setChargeNameDraft(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') handleCommitRename(charge.id);
+                                            if (e.key === 'Escape') setEditingChargeId(null);
+                                        }}
+                                        autoFocus
+                                        placeholder="Charge name..."
+                                        title="Rename charge"
+                                        className="flex-1 text-sm font-semibold text-black bg-white border border-black/15 rounded-lg px-2 py-0.5 outline-none focus:ring-2 focus:ring-blue-200"
+                                    />
+                                    <button
+                                        onClick={() => handleCommitRename(charge.id)}
+                                        className="p-1 rounded bg-black text-white hover:bg-black/80 transition-colors"
+                                        title="Save"
+                                    >
+                                        <Check className="w-3 h-3" />
+                                    </button>
+                                    <button
+                                        onClick={() => setEditingChargeId(null)}
+                                        className="p-1 rounded text-black/30 hover:text-black transition-colors"
+                                        title="Cancel"
+                                    >
+                                        <X className="w-3 h-3" />
+                                    </button>
+                                </div>
+                            ) : (
+                                <span className="text-sm font-semibold text-black flex-1 truncate">{charge.name}</span>
+                            )}
+
+                            <span className="text-[10px] text-black/30 font-mono">
+                                {charge.formulas.length}f · {charge.usedInputIds.length}i
+                            </span>
+
+                            <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                    onClick={() => handleStartRename(charge)}
+                                    className="p-1 rounded text-black/15 hover:text-black transition-colors"
+                                    title="Rename"
+                                >
+                                    <Pencil className="w-3 h-3" />
+                                </button>
+                                <button
+                                    onClick={() => deleteCalculator(charge.id)}
+                                    className="p-1 rounded text-black/15 hover:text-red-500 transition-colors"
+                                    title="Delete charge"
+                                >
+                                    <Trash2 className="w-3 h-3" />
+                                </button>
+                            </div>
+
+                            {isExpanded ? (
+                                <ChevronRight className="w-3.5 h-3.5 text-black/20 rotate-90 transition-transform" />
+                            ) : (
+                                <ChevronRight className="w-3.5 h-3.5 text-black/20 transition-transform" />
+                            )}
+                        </div>
+
+                        {/* Expanded: show formula builder for this charge */}
+                        {isExpanded && (
+                            <div className="px-4 pb-4 border-t border-black/5 animate-slide-up">
+                                <DragDropCalculatorBuilder calculatorId={charge.id} />
+                            </div>
+                        )}
+                    </div>
+                );
+            })}
+
+            {/* Add charge button / inline name input */}
+            {showNewChargeInput ? (
+                <div className="flex items-center gap-2 rounded-2xl p-3 border border-dashed border-blue-300 bg-blue-50/30 animate-slide-up">
+                    <Plus className="w-4 h-4 text-blue-400 shrink-0" />
+                    <input
+                        type="text"
+                        value={newChargeName}
+                        onChange={(e) => setNewChargeName(e.target.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleAddCharge();
+                            if (e.key === 'Escape') { setShowNewChargeInput(false); setNewChargeName(''); }
+                        }}
+                        autoFocus
+                        placeholder="Enter charge name (e.g. Installation, Accessories)..."
+                        title="New charge name"
+                        className="flex-1 text-sm text-black bg-transparent outline-none placeholder:text-black/30"
+                    />
+                    <button
+                        onClick={handleAddCharge}
+                        disabled={!newChargeName.trim()}
+                        className="px-3 py-1 text-xs font-semibold text-white bg-blue-500 hover:bg-blue-600 disabled:bg-black/10 disabled:text-black/30 rounded-lg transition-colors"
+                        title="Create charge"
+                    >
+                        Add
+                    </button>
+                    <button
+                        onClick={() => { setShowNewChargeInput(false); setNewChargeName(''); }}
+                        className="p-1 rounded text-black/30 hover:text-black transition-colors"
+                        title="Cancel"
+                    >
+                        <X className="w-3.5 h-3.5" />
+                    </button>
+                </div>
+            ) : (
+                <button
+                    onClick={() => setShowNewChargeInput(true)}
+                    className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-dashed border-black/10 hover:border-blue-300 hover:bg-blue-50/30 text-black/30 hover:text-blue-500 transition-all group"
+                    title="Add other charges"
+                >
+                    <Plus className="w-4 h-4 group-hover:scale-110 transition-transform" />
+                    <span className="text-sm font-medium">Add Other Charges</span>
+                </button>
+            )}
         </div>
     );
 }

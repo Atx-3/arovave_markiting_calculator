@@ -15,7 +15,9 @@ import {
     Combine,
     Copy,
     Eye,
+    EyeOff,
     Zap,
+    AlertTriangle,
 } from 'lucide-react';
 import { useAppStore } from '../../stores/templateStore';
 import type { FormulaToken, InputDefinition, InputType } from '../../types/calculator';
@@ -87,6 +89,7 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
         updateFormula,
         moveFormula,
         addUsedInput,
+        insertFormulaToken,
         addLocalRate,
         removeLocalRate,
         updateLocalRate,
@@ -177,10 +180,10 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
         store.setFormulaTokens(calculatorId, targetFormulaId, [...formula.tokens, newToken]);
     };
 
-    const addTokenToFormula = (formulaId: string, token: FormulaToken) => {
+    const insertTokenInFormula = (formulaId: string, index: number, token: FormulaToken) => {
         const formula = calc.formulas.find((f) => f.id === formulaId);
         if (!formula) return;
-        store.setFormulaTokens(calculatorId, formulaId, [...formula.tokens, token]);
+        insertFormulaToken(calculatorId, formulaId, index, token);
     };
 
     const removeTokenFromFormula = (formulaId: string, index: number) => {
@@ -245,7 +248,8 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                                                 setActiveFormula(targetId);
                                             }
                                             addUsedInput(calculatorId, input.id);
-                                            addTokenToFormula(targetId, {
+                                            const targetFormula = calc.formulas.find((f) => f.id === targetId);
+                                            insertTokenInFormula(targetId, targetFormula?.tokens.length || 0, {
                                                 type: 'input',
                                                 value: input.id,
                                                 label: input.name,
@@ -290,7 +294,8 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                                         onDragStart={(e) => handleFormulaDragStart(e, f.id, f.label)}
                                         onClick={() => {
                                             if (!activeFormula) return;
-                                            addTokenToFormula(activeFormula, {
+                                            const targetFormula = calc.formulas.find((fm) => fm.id === activeFormula);
+                                            insertTokenInFormula(activeFormula, targetFormula?.tokens.length || 0, {
                                                 type: 'formula_ref',
                                                 value: f.id,
                                                 label: f.label,
@@ -395,7 +400,10 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                                         isTotal: newIsTotal,
                                     });
                                 }}
-                                onAddToken={(token) => addTokenToFormula(formula.id, token)}
+                                onToggleHidden={() =>
+                                    updateFormula(calculatorId, formula.id, { hidden: !formula.hidden })
+                                }
+                                onInsertToken={(index, token) => insertTokenInFormula(formula.id, index, token)}
                                 onRemoveToken={(tokenIdx) =>
                                     removeTokenFromFormula(formula.id, tokenIdx)
                                 }
@@ -497,65 +505,6 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                     </div>
                 )}
             </div>
-
-            {/* ─── Right Sidebar: Local Rates ─── */}
-            <div className="w-52 shrink-0 space-y-3">
-                <h3 className="text-xs font-bold text-black/50 uppercase tracking-wider px-1">
-                    Local Rates
-                </h3>
-                <p className="text-[11px] text-black/30 px-1">
-                    Rates specific to this calculator
-                </p>
-
-                <div className="space-y-1.5">
-                    {calc.localRates.map((lr) => (
-                        <div
-                            key={lr.id}
-                            className="bg-white rounded-xl border border-black/8 p-2.5 space-y-1.5"
-                        >
-                            <input
-                                type="text"
-                                value={lr.name}
-                                onChange={(e) =>
-                                    updateLocalRate(calculatorId, lr.id, { name: e.target.value })
-                                }
-                                placeholder="Rate name..."
-                                className="w-full text-xs text-black bg-transparent outline-none placeholder:text-black/25 font-medium"
-                            />
-                            <div className="flex items-center gap-1.5">
-                                <span className="text-[10px] text-black/30">₹</span>
-                                <input
-                                    type="text"
-                                    value={lr.rate}
-                                    onChange={(e) =>
-                                        updateLocalRate(calculatorId, lr.id, {
-                                            rate: e.target.value,
-                                        })
-                                    }
-                                    placeholder="0"
-                                    className="flex-1 text-xs text-black bg-transparent outline-none placeholder:text-black/25 font-mono"
-                                />
-                                <button
-                                    onClick={() => removeLocalRate(calculatorId, lr.id)}
-                                    className="p-0.5 rounded text-black/15 hover:text-red-500 transition-colors"
-                                    title="Remove local rate"
-                                >
-                                    <Trash2 className="w-3 h-3" />
-                                </button>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-
-                <button
-                    onClick={() => addLocalRate(calculatorId)}
-                    className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-xl border border-dashed border-black/15 text-xs text-black/40 hover:text-black hover:border-black/25 font-semibold transition-colors"
-                    title="Add a local rate for this calculator"
-                >
-                    <Plus className="w-3 h-3" />
-                    Add Local Rate
-                </button>
-            </div>
         </div>
     );
 }
@@ -577,7 +526,8 @@ function FormulaCard({
     onMove,
     onUpdateLabel,
     onToggleTotal,
-    onAddToken,
+    onToggleHidden,
+    onInsertToken,
     onRemoveToken,
     inputDefinitions,
     allFormulas,
@@ -586,7 +536,7 @@ function FormulaCard({
     onDrop,
 }: {
     calculatorId: string;
-    formula: { id: string; label: string; tokens: FormulaToken[]; isTotal?: boolean; order: number };
+    formula: { id: string; label: string; tokens: FormulaToken[]; isTotal?: boolean; hidden?: boolean; order: number };
     index: number;
     totalFormulas: number;
     isActive: boolean;
@@ -597,7 +547,8 @@ function FormulaCard({
     onMove: (dir: 'up' | 'down') => void;
     onUpdateLabel: (label: string) => void;
     onToggleTotal: () => void;
-    onAddToken: (token: FormulaToken) => void;
+    onToggleHidden: () => void;
+    onInsertToken: (index: number, token: FormulaToken) => void;
     onRemoveToken: (index: number) => void;
     inputDefinitions: InputDefinition[];
     allFormulas: { id: string; label: string }[];
@@ -607,19 +558,44 @@ function FormulaCard({
 }) {
     const [showNumberInput, setShowNumberInput] = useState(false);
     const [numberValue, setNumberValue] = useState('');
+    const [cursorIndex, setCursorIndex] = useState(formula.tokens.length);
 
     const getInputName = (id: string) => {
         const input = inputDefinitions.find((i) => i.id === id);
         return input?.name || 'Unknown';
     };
 
+    // Insert at cursor and advance
+    const insertAtCursor = (token: FormulaToken) => {
+        const pos = Math.min(cursorIndex, formula.tokens.length);
+        onInsertToken(pos, token);
+        setCursorIndex(pos + 1);
+    };
+
     const handleAddNumber = () => {
         if (numberValue) {
-            onAddToken({ type: 'number', value: numberValue });
+            insertAtCursor({ type: 'number', value: numberValue });
             setNumberValue('');
             setShowNumberInput(false);
         }
     };
+
+    const handleRemoveToken = (idx: number) => {
+        onRemoveToken(idx);
+        // Adjust cursor: if cursor was after this token, move it back
+        if (cursorIndex > idx) {
+            setCursorIndex(cursorIndex - 1);
+        }
+    };
+
+    // Detect formulas that reference this formula
+    const dependentFormulas = allFormulas.filter((f) =>
+        f.id !== formula.id &&
+        (useAppStore.getState().calculators
+            .find((c) => c.id === calculatorId)
+            ?.formulas.find((ff) => ff.id === f.id)
+            ?.tokens.some((t) => t.type === 'formula_ref' && t.value === formula.id) ?? false)
+    );
 
     const preview = getFormulaPreview(formula.tokens, inputDefinitions, allFormulas);
 
@@ -657,8 +633,23 @@ function FormulaCard({
                     </span>
                 )}
 
+                {/* Hidden badge */}
+                {formula.hidden && (
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-amber-500 bg-amber-50 px-1.5 py-0.5 rounded-md">Hidden</span>
+                )}
+
                 {/* Actions */}
                 <div className="flex items-center gap-0.5 shrink-0">
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleHidden();
+                        }}
+                        className={`p-1 rounded transition-colors ${formula.hidden ? 'text-amber-500 hover:text-amber-600' : 'text-black/15 hover:text-black'}`}
+                        title={formula.hidden ? 'Show on sales page' : 'Hide from sales page'}
+                    >
+                        {formula.hidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
@@ -704,9 +695,26 @@ function FormulaCard({
                 </div>
             </div>
 
-            {/* Token Display / Drop Zone — Always show tokens, expand editor when active */}
+            {/* Token Display / Drop Zone — expand editor when active */}
             {isActive && (
                 <div className="px-4 pb-4 space-y-3 animate-slide-up">
+                    {/* Dependency Warning */}
+                    {dependentFormulas.length > 0 && (
+                        <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-700">
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                            <span className="text-[11px] leading-relaxed">
+                                <strong>Warning:</strong> This formula is referenced by{' '}
+                                {dependentFormulas.map((f, i) => (
+                                    <span key={f.id}>
+                                        {i > 0 && ', '}
+                                        <strong>{f.label}</strong>
+                                    </span>
+                                ))}
+                                . Changes will affect those calculations.
+                            </span>
+                        </div>
+                    )}
+
                     {/* Formula expression preview */}
                     {formula.tokens.length > 0 && (
                         <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-gradient-to-r from-black/[0.02] to-transparent">
@@ -717,32 +725,58 @@ function FormulaCard({
                         </div>
                     )}
 
-                    {/* Token Chain / Drop Zone */}
+                    {/* Token Chain / Drop Zone — with clickable cursor gaps */}
                     <div
                         onDragOver={onDragOver}
                         onDragLeave={onDragLeave}
                         onDrop={onDrop}
-                        className={`min-h-[56px] rounded-xl border-2 border-dashed p-3 flex flex-wrap items-center gap-1.5 transition-colors ${isDragOver
+                        className={`min-h-[56px] rounded-xl border-2 border-dashed p-3 flex flex-wrap items-center gap-0 transition-colors ${isDragOver
                             ? 'border-blue-300 bg-blue-50/30'
                             : formula.tokens.length === 0
                                 ? 'border-black/10 bg-black/[0.01]'
                                 : 'border-black/8 bg-black/[0.01]'
                             }`}
                     >
-                        {formula.tokens.length === 0 && (
-                            <span className="text-xs text-black/25 italic flex items-center gap-2">
+                        {formula.tokens.length === 0 ? (
+                            <span
+                                className="text-xs text-black/25 italic flex items-center gap-2 w-full cursor-text"
+                                onClick={() => setCursorIndex(0)}
+                            >
                                 <Zap className="w-3.5 h-3.5" />
-                                Drag inputs here or use buttons below to build your formula...
+                                Click here, then use buttons below to build your formula...
                             </span>
+                        ) : (
+                            <>
+                                {/* Render gap slots + tokens with cursor */}
+                                {formula.tokens.map((token, idx) => (
+                                    <span key={idx} className="inline-flex items-center">
+                                        {/* Gap slot BEFORE this token */}
+                                        <span
+                                            onClick={(e) => { e.stopPropagation(); setCursorIndex(idx); }}
+                                            className={`w-1 self-stretch min-h-[28px] rounded-sm cursor-text transition-all mx-0.5 ${cursorIndex === idx
+                                                ? 'bg-blue-500 animate-pulse w-[3px]'
+                                                : 'hover:bg-blue-300 hover:w-[3px]'
+                                                }`}
+                                            title="Click to place cursor here"
+                                        />
+                                        <TokenChip
+                                            token={token}
+                                            onRemove={() => handleRemoveToken(idx)}
+                                            getInputName={getInputName}
+                                        />
+                                    </span>
+                                ))}
+                                {/* Gap slot AFTER last token */}
+                                <span
+                                    onClick={(e) => { e.stopPropagation(); setCursorIndex(formula.tokens.length); }}
+                                    className={`w-1 self-stretch min-h-[28px] rounded-sm cursor-text transition-all mx-0.5 flex-1 min-w-[12px] ${cursorIndex === formula.tokens.length
+                                        ? 'bg-blue-500 animate-pulse w-[3px] flex-initial'
+                                        : 'hover:bg-blue-300 hover:w-[3px]'
+                                        }`}
+                                    title="Click to place cursor at end"
+                                />
+                            </>
                         )}
-                        {formula.tokens.map((token, idx) => (
-                            <TokenChip
-                                key={idx}
-                                token={token}
-                                onRemove={() => onRemoveToken(idx)}
-                                getInputName={getInputName}
-                            />
-                        ))}
                     </div>
 
                     {/* Operator + Bracket Row */}
@@ -753,7 +787,7 @@ function FormulaCard({
                                 <button
                                     key={op.symbol}
                                     onClick={() =>
-                                        onAddToken({ type: 'operator', value: op.symbol })
+                                        insertAtCursor({ type: 'operator', value: op.symbol })
                                     }
                                     className="w-8 h-8 flex items-center justify-center rounded-lg text-sm font-bold text-black/50 hover:text-black hover:bg-white hover:shadow-sm transition-all"
                                     title={op.label}
@@ -769,7 +803,7 @@ function FormulaCard({
                                 <button
                                     key={b.symbol}
                                     onClick={() =>
-                                        onAddToken({ type: 'bracket', value: b.symbol })
+                                        insertAtCursor({ type: 'bracket', value: b.symbol })
                                     }
                                     className="w-8 h-8 flex items-center justify-center rounded-lg text-sm font-bold text-black/40 hover:text-black hover:bg-white hover:shadow-sm transition-all"
                                     title={b.label}
@@ -830,7 +864,7 @@ function FormulaCard({
                                         key={input.id}
                                         onClick={() => {
                                             addUsedInput(calculatorId, input.id);
-                                            onAddToken({
+                                            insertAtCursor({
                                                 type: 'input',
                                                 value: input.id,
                                                 label: input.name,
