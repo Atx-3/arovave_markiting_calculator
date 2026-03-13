@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
     Plus,
     Trash2,
@@ -18,6 +18,10 @@ import {
     EyeOff,
     Zap,
     AlertTriangle,
+    Save,
+    Check,
+    Pencil,
+    RotateCcw,
 } from 'lucide-react';
 import { useAppStore } from '../../stores/templateStore';
 import type { FormulaToken, InputDefinition, InputType } from '../../types/calculator';
@@ -105,6 +109,67 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
         sortedFormulas.length > 0 ? sortedFormulas[0].id : null,
     );
     const [dragOverFormula, setDragOverFormula] = useState(false);
+
+    // ── Formula Save/Edit/Discard state ──
+    // Track which formulas are currently in editing mode
+    const [editingFormulaIds, setEditingFormulaIds] = useState<Set<string>>(
+        () => new Set(), // Existing formulas start as saved (locked) on load
+    );
+    // Snapshot of tokens before editing (for discard)
+    const [formulaSnapshots, setFormulaSnapshots] = useState<Record<string, FormulaToken[]>>({});
+    // Discard confirmation state
+    const [showDiscardConfirm, setShowDiscardConfirm] = useState<string | null>(null);
+
+    // Determine if a formula is in editing mode
+    const isFormulaEditing = (formulaId: string) => editingFormulaIds.has(formulaId);
+
+    // Save a formula (lock it)
+    const handleSaveFormula = (formulaId: string) => {
+        setEditingFormulaIds((prev) => {
+            const next = new Set(prev);
+            next.delete(formulaId);
+            return next;
+        });
+        // Clear snapshot
+        setFormulaSnapshots((prev) => {
+            const next = { ...prev };
+            delete next[formulaId];
+            return next;
+        });
+    };
+
+    // Start editing a saved formula
+    const handleStartEditing = (formulaId: string) => {
+        // Snapshot current tokens
+        const formula = calc.formulas.find((f) => f.id === formulaId);
+        if (formula) {
+            setFormulaSnapshots((prev) => ({
+                ...prev,
+                [formulaId]: [...formula.tokens],
+            }));
+        }
+        setEditingFormulaIds((prev) => new Set(prev).add(formulaId));
+        setActiveFormula(formulaId);
+    };
+
+    // Discard changes — restore snapshot
+    const handleDiscardChanges = (formulaId: string) => {
+        const snapshot = formulaSnapshots[formulaId];
+        if (snapshot) {
+            store.setFormulaTokens(calculatorId, formulaId, snapshot);
+        }
+        setEditingFormulaIds((prev) => {
+            const next = new Set(prev);
+            next.delete(formulaId);
+            return next;
+        });
+        setFormulaSnapshots((prev) => {
+            const next = { ...prev };
+            delete next[formulaId];
+            return next;
+        });
+        setShowDiscardConfirm(null);
+    };
 
     // Drag an input to the formula canvas
     const handleDragStart = (e: React.DragEvent, inputId: string) => {
@@ -196,6 +261,8 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
     const handleAddFormula = () => {
         const id = addFormula(calculatorId);
         setActiveFormula(id);
+        // New formulas start in editing mode
+        setEditingFormulaIds((prev) => new Set(prev).add(id));
     };
 
     const handleDuplicateFormula = (formulaId: string) => {
@@ -208,6 +275,8 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
         });
         store.setFormulaTokens(calculatorId, newId, [...formula.tokens]);
         setActiveFormula(newId);
+        // Duplicated formulas start in editing mode
+        setEditingFormulaIds((prev) => new Set(prev).add(newId));
     };
 
     return (
@@ -372,9 +441,16 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                                 totalFormulas={sortedFormulas.length}
                                 isActive={activeFormula === formula.id}
                                 isDragOver={activeFormula === formula.id && dragOverFormula}
+                                isEditing={isFormulaEditing(formula.id)}
+                                showDiscardConfirm={showDiscardConfirm === formula.id}
                                 onActivate={() => setActiveFormula(formula.id)}
                                 onRemove={() => {
                                     removeFormula(calculatorId, formula.id);
+                                    setEditingFormulaIds((prev) => {
+                                        const next = new Set(prev);
+                                        next.delete(formula.id);
+                                        return next;
+                                    });
                                     if (activeFormula === formula.id) {
                                         setActiveFormula(
                                             sortedFormulas.find((f) => f.id !== formula.id)?.id || null,
@@ -387,15 +463,12 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                                     updateFormula(calculatorId, formula.id, { label })
                                 }
                                 onToggleTotal={() => {
-                                    // Make grand total exclusive — only one per calculator
                                     const newIsTotal = !formula.isTotal;
-                                    // First, clear isTotal on ALL formulas
                                     sortedFormulas.forEach((f) => {
                                         if (f.isTotal && f.id !== formula.id) {
                                             updateFormula(calculatorId, f.id, { isTotal: false });
                                         }
                                     });
-                                    // Then set/toggle this one
                                     updateFormula(calculatorId, formula.id, {
                                         isTotal: newIsTotal,
                                     });
@@ -407,6 +480,17 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                                 onRemoveToken={(tokenIdx) =>
                                     removeTokenFromFormula(formula.id, tokenIdx)
                                 }
+                                hasChanges={(() => {
+                                    const snap = formulaSnapshots[formula.id];
+                                    if (!snap) return formula.tokens.length > 0;
+                                    if (snap.length !== formula.tokens.length) return true;
+                                    return snap.some((t, i) => t.type !== formula.tokens[i]?.type || t.value !== formula.tokens[i]?.value);
+                                })()}
+                                onSaveFormula={() => handleSaveFormula(formula.id)}
+                                onStartEditing={() => handleStartEditing(formula.id)}
+                                onDiscardChanges={() => handleDiscardChanges(formula.id)}
+                                onRequestDiscard={() => setShowDiscardConfirm(formula.id)}
+                                onCancelDiscard={() => setShowDiscardConfirm(null)}
                                 inputDefinitions={inputDefinitions}
                                 allFormulas={sortedFormulas}
                                 onDragOver={handleDragOver}
@@ -520,6 +604,9 @@ function FormulaCard({
     totalFormulas,
     isActive,
     isDragOver,
+    isEditing,
+    showDiscardConfirm,
+    hasChanges,
     onActivate,
     onRemove,
     onDuplicate,
@@ -529,6 +616,11 @@ function FormulaCard({
     onToggleHidden,
     onInsertToken,
     onRemoveToken,
+    onSaveFormula,
+    onStartEditing,
+    onDiscardChanges,
+    onRequestDiscard,
+    onCancelDiscard,
     inputDefinitions,
     allFormulas,
     onDragOver,
@@ -541,6 +633,9 @@ function FormulaCard({
     totalFormulas: number;
     isActive: boolean;
     isDragOver: boolean;
+    isEditing: boolean;
+    showDiscardConfirm: boolean;
+    hasChanges: boolean;
     onActivate: () => void;
     onRemove: () => void;
     onDuplicate: () => void;
@@ -550,6 +645,11 @@ function FormulaCard({
     onToggleHidden: () => void;
     onInsertToken: (index: number, token: FormulaToken) => void;
     onRemoveToken: (index: number) => void;
+    onSaveFormula: () => void;
+    onStartEditing: () => void;
+    onDiscardChanges: () => void;
+    onRequestDiscard: () => void;
+    onCancelDiscard: () => void;
     inputDefinitions: InputDefinition[];
     allFormulas: { id: string; label: string }[];
     onDragOver: (e: React.DragEvent) => void;
@@ -559,6 +659,13 @@ function FormulaCard({
     const [showNumberInput, setShowNumberInput] = useState(false);
     const [numberValue, setNumberValue] = useState('');
     const [cursorIndex, setCursorIndex] = useState(formula.tokens.length);
+
+    // Clamp cursor to valid range whenever tokens change
+    useEffect(() => {
+        if (cursorIndex > formula.tokens.length) {
+            setCursorIndex(formula.tokens.length);
+        }
+    }, [formula.tokens.length, cursorIndex]);
 
     const getInputName = (id: string) => {
         const input = inputDefinitions.find((i) => i.id === id);
@@ -582,7 +689,6 @@ function FormulaCard({
 
     const handleRemoveToken = (idx: number) => {
         onRemoveToken(idx);
-        // Adjust cursor: if cursor was after this token, move it back
         if (cursorIndex > idx) {
             setCursorIndex(cursorIndex - 1);
         }
@@ -599,33 +705,62 @@ function FormulaCard({
 
     const preview = getFormulaPreview(formula.tokens, inputDefinitions, allFormulas);
 
+    // Is this formula saved (locked / read-only)?
+    const isSaved = !isEditing;
+
     return (
         <div
             onClick={onActivate}
             className={`rounded-2xl border transition-all duration-300 ${isActive
-                ? `bg-white border-black/15 shadow-lg shadow-black/10 ${isDragOver ? 'ring-2 ring-blue-400/50 border-blue-300' : ''
-                }`
-                : 'bg-white/60 border-black/6 hover:border-black/10 cursor-pointer'
+                ? isEditing
+                    ? `bg-white border-blue-300 shadow-lg shadow-blue-100/50 ring-2 ring-blue-200/50 ${isDragOver ? 'ring-blue-400/50 border-blue-400' : ''}`
+                    : 'bg-white border-black/15 shadow-lg shadow-black/10'
+                : isSaved
+                    ? 'bg-white/80 border-emerald-200/50 hover:border-emerald-300 cursor-pointer'
+                    : 'bg-white/60 border-black/6 hover:border-black/10 cursor-pointer'
                 }`}
         >
             {/* Formula Header */}
             <div className="flex items-center gap-2 px-4 py-3">
                 {/* Order number */}
-                <span className={`text-[10px] font-bold w-5 h-5 rounded-md flex items-center justify-center shrink-0 ${isActive ? 'bg-black text-white' : 'bg-black/5 text-black/30'
+                <span className={`text-[10px] font-bold w-5 h-5 rounded-md flex items-center justify-center shrink-0 ${isActive
+                    ? isEditing ? 'bg-blue-500 text-white' : 'bg-black text-white'
+                    : isSaved ? 'bg-emerald-100 text-emerald-600' : 'bg-black/5 text-black/30'
                     }`}>{index + 1}</span>
 
-                {/* Label */}
-                <input
-                    type="text"
-                    value={formula.label}
-                    onChange={(e) => onUpdateLabel(e.target.value)}
-                    onClick={(e) => e.stopPropagation()}
-                    className={`flex-1 text-sm font-semibold bg-transparent outline-none min-w-0 ${formula.isTotal ? 'text-emerald-700' : 'text-black'
-                        }`}
-                    placeholder="Formula name..."
-                />
+                {/* Saved badge */}
+                {isSaved && (
+                    <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-emerald-600 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-md shrink-0">
+                        <Check className="w-2.5 h-2.5" />
+                        Saved
+                    </span>
+                )}
 
-                {/* Expression Preview (when collapsed) */}
+                {/* Editing badge */}
+                {isEditing && isActive && (
+                    <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-blue-600 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-md shrink-0">
+                        <Pencil className="w-2.5 h-2.5" />
+                        Editing
+                    </span>
+                )}
+
+                {/* Label */}
+                {isEditing && isActive ? (
+                    <input
+                        type="text"
+                        value={formula.label}
+                        onChange={(e) => onUpdateLabel(e.target.value)}
+                        onClick={(e) => e.stopPropagation()}
+                        className={`flex-1 text-sm font-semibold bg-transparent outline-none min-w-0 ${formula.isTotal ? 'text-emerald-700' : 'text-black'}`}
+                        placeholder="Formula name..."
+                    />
+                ) : (
+                    <span className={`flex-1 text-sm font-semibold min-w-0 truncate ${formula.isTotal ? 'text-emerald-700' : 'text-black'}`}>
+                        {formula.label || 'Unnamed formula'}
+                    </span>
+                )}
+
+                {/* Expression Preview (when not active) */}
                 {!isActive && formula.tokens.length > 0 && (
                     <span className="text-[11px] text-black/30 font-mono truncate max-w-[200px] shrink-0"
                         title={preview}>
@@ -640,6 +775,21 @@ function FormulaCard({
 
                 {/* Actions */}
                 <div className="flex items-center gap-0.5 shrink-0">
+                    {/* Edit button for saved formulas */}
+                    {isSaved && (
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                onStartEditing();
+                            }}
+                            className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-colors"
+                            title="Edit this formula"
+                        >
+                            <Pencil className="w-3 h-3" />
+                            Edit
+                        </button>
+                    )}
+
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
@@ -695,9 +845,51 @@ function FormulaCard({
                 </div>
             </div>
 
-            {/* Token Display / Drop Zone — expand editor when active */}
-            {isActive && (
+            {/* ═══ SAVED (READ-ONLY) VIEW ═══ */}
+            {isActive && isSaved && formula.tokens.length > 0 && (
+                <div className="px-4 pb-4 animate-slide-up">
+                    <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-emerald-50/50 border border-emerald-100">
+                        <Lock className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span className="text-[12px] text-emerald-700 font-mono truncate flex-1">
+                            {formula.label} = {preview}
+                        </span>
+                    </div>
+                </div>
+            )}
+
+            {/* ═══ EDITING VIEW ═══ */}
+            {isActive && isEditing && (
                 <div className="px-4 pb-4 space-y-3 animate-slide-up">
+                    {/* Discard Confirmation Warning */}
+                    {showDiscardConfirm && (
+                        <div className="rounded-xl border-2 border-red-300 bg-red-50 p-3 space-y-2">
+                            <div className="flex items-start gap-2">
+                                <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                                <div>
+                                    <p className="text-sm font-bold text-red-700">Discard all changes?</p>
+                                    <p className="text-xs text-red-600/70 mt-0.5">
+                                        This will revert the formula back to its last saved state. Any changes you've made will be permanently lost.
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2 ml-6">
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); onDiscardChanges(); }}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500 text-white text-xs font-semibold hover:bg-red-600 transition-colors"
+                                >
+                                    <Trash2 className="w-3 h-3" />
+                                    Yes, Discard Changes
+                                </button>
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); onCancelDiscard(); }}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-black/10 text-black/60 text-xs font-semibold hover:bg-black/[0.03] transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    )}
+
                     {/* Dependency Warning */}
                     {dependentFormulas.length > 0 && (
                         <div className="flex items-start gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-700">
@@ -717,9 +909,9 @@ function FormulaCard({
 
                     {/* Formula expression preview */}
                     {formula.tokens.length > 0 && (
-                        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-gradient-to-r from-black/[0.02] to-transparent">
-                            <Eye className="w-3 h-3 text-black/20 shrink-0" />
-                            <span className="text-[11px] text-black/40 font-mono truncate">
+                        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-gradient-to-r from-blue-50/50 to-transparent border border-blue-100/50">
+                            <Eye className="w-3 h-3 text-blue-400 shrink-0" />
+                            <span className="text-[11px] text-blue-600/60 font-mono truncate">
                                 {formula.label} = {preview}
                             </span>
                         </div>
@@ -733,13 +925,13 @@ function FormulaCard({
                         className={`min-h-[56px] rounded-xl border-2 border-dashed p-3 flex flex-wrap items-center gap-0 transition-colors ${isDragOver
                             ? 'border-blue-300 bg-blue-50/30'
                             : formula.tokens.length === 0
-                                ? 'border-black/10 bg-black/[0.01]'
-                                : 'border-black/8 bg-black/[0.01]'
+                                ? 'border-blue-200/60 bg-blue-50/20'
+                                : 'border-blue-200/40 bg-blue-50/10'
                             }`}
                     >
                         {formula.tokens.length === 0 ? (
                             <span
-                                className="text-xs text-black/25 italic flex items-center gap-2 w-full cursor-text"
+                                className="text-xs text-blue-400/50 italic flex items-center gap-2 w-full cursor-text"
                                 onClick={() => setCursorIndex(0)}
                             >
                                 <Zap className="w-3.5 h-3.5" />
@@ -877,6 +1069,34 @@ function FormulaCard({
                                     </button>
                                 ))}
                             </div>
+                        )}
+                    </div>
+
+                    {/* ═══ SAVE / DISCARD BUTTONS ═══ */}
+                    <div className="flex items-center gap-2 pt-2 border-t border-blue-100">
+                        {hasChanges ? (
+                            <>
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); onSaveFormula(); }}
+                                    disabled={formula.tokens.length === 0}
+                                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-500 text-white text-xs font-bold hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm shadow-emerald-200"
+                                >
+                                    <Save className="w-3.5 h-3.5" />
+                                    Save Changes
+                                </button>
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); onRequestDiscard(); }}
+                                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white border border-red-200 text-red-500 text-xs font-bold hover:bg-red-50 transition-all"
+                                >
+                                    <RotateCcw className="w-3.5 h-3.5" />
+                                    Discard Changes
+                                </button>
+                            </>
+                        ) : (
+                            <span className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-emerald-500">
+                                <Check className="w-3.5 h-3.5" />
+                                Already saved — no changes made
+                            </span>
                         )}
                     </div>
                 </div>

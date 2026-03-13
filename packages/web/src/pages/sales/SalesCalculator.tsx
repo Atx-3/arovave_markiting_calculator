@@ -10,6 +10,7 @@ import {
     Plus,
     FileText,
     MessageCircle,
+    AlertTriangle,
 } from 'lucide-react';
 import { useAppStore } from '../../stores/templateStore';
 import type { RefTreeNode, Calculator as CalcType, InputDefinition } from '../../types/calculator';
@@ -228,23 +229,35 @@ export function SalesCalculator() {
                                     const calcs = store.getCalculatorsForCategory(cat.id);
                                     const hasCalc = calcs.length > 0;
                                     const subChildren = getCategoryChildren(cat.id);
+                                    // Check if this is a leaf category (no subcategories) with no calculator
+                                    const isLeafWithoutCalc = !hasCalc && subChildren.length === 0;
 
                                     return (
                                         <button
                                             key={cat.id}
                                             onClick={() => navigateTo(cat.id)}
-                                            className="glass rounded-2xl p-4 text-left hover:border-black/15 border border-transparent transition-all duration-200 group"
+                                            className={`glass rounded-2xl p-4 text-left border transition-all duration-200 group ${
+                                                isLeafWithoutCalc
+                                                    ? 'border-amber-200/60 bg-amber-50/30 hover:border-amber-300/80'
+                                                    : 'border-transparent hover:border-black/15'
+                                            }`}
                                         >
                                             {hasCalc ? (
                                                 <Calculator className="w-6 h-6 text-black mb-2 group-hover:scale-110 transition-transform" />
+                                            ) : isLeafWithoutCalc ? (
+                                                <AlertTriangle className="w-6 h-6 text-amber-400 mb-2 group-hover:scale-110 transition-transform" />
                                             ) : (
                                                 <FolderOpen className="w-6 h-6 text-black/50 mb-2 group-hover:scale-110 transition-transform" />
                                             )}
                                             <span className="text-base font-semibold text-black block">{cat.name}</span>
-                                            <span className="text-[11px] text-black/40 mt-0.5 block">
+                                            <span className={`text-[11px] mt-0.5 block ${
+                                                isLeafWithoutCalc ? 'text-amber-500' : 'text-black/40'
+                                            }`}>
                                                 {hasCalc
                                                     ? `${calcs.length} calculator${calcs.length > 1 ? 's' : ''}`
-                                                    : `${subChildren.length} sub-categories`}
+                                                    : isLeafWithoutCalc
+                                                        ? 'No calculator'
+                                                        : `${subChildren.length} sub-categories`}
                                             </span>
                                         </button>
                                     );
@@ -252,14 +265,21 @@ export function SalesCalculator() {
                             </div>
                         )}
 
-                        {/* Empty state */}
+                        {/* Empty state — Calculator not found */}
                         {displayChildren.length === 0 && !currentCalc && (
-                            <div className="glass rounded-2xl p-10 text-center">
-                                <Calculator className="w-12 h-12 text-black/20 mx-auto mb-3" />
-                                <p className="text-black/40 text-base">
+                            <div className="rounded-2xl border-2 border-dashed border-amber-300/60 bg-gradient-to-br from-amber-50/80 to-orange-50/40 p-10 text-center">
+                                <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-amber-100 mb-4">
+                                    <AlertTriangle className="w-7 h-7 text-amber-500" />
+                                </div>
+                                <h3 className="text-lg font-bold text-amber-800 mb-1">
                                     {currentCategoryId
-                                        ? 'No calculator set up for this category yet.'
-                                        : 'No categories yet. Ask your admin to create product categories.'}
+                                        ? 'Calculator Not Found'
+                                        : 'No Categories Yet'}
+                                </h3>
+                                <p className="text-sm text-amber-700/70 max-w-sm mx-auto">
+                                    {currentCategoryId
+                                        ? 'This calculator hasn\'t been configured yet. Please ask your admin to create a calculator for this category.'
+                                        : 'No product categories have been created. Please ask your admin to set up categories and calculators.'}
                                 </p>
                             </div>
                         )}
