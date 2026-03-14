@@ -113,8 +113,8 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
     const [editingFormulaIds, setEditingFormulaIds] = useState<Set<string>>(
         () => new Set(), // Existing formulas start as saved (locked) on load
     );
-    // Snapshot of tokens before editing (for discard)
-    const [formulaSnapshots, setFormulaSnapshots] = useState<Record<string, FormulaToken[]>>({});
+    // Snapshot of tokens + label before editing (for discard)
+    const [formulaSnapshots, setFormulaSnapshots] = useState<Record<string, { tokens: FormulaToken[]; label: string }>>({});
     // Discard confirmation state
     const [showDiscardConfirm, setShowDiscardConfirm] = useState<string | null>(null);
 
@@ -158,7 +158,7 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
         if (formula) {
             setFormulaSnapshots((prev) => ({
                 ...prev,
-                [formulaId]: [...formula.tokens],
+                [formulaId]: { tokens: [...formula.tokens], label: formula.label },
             }));
         }
         setEditingFormulaIds((prev) => new Set(prev).add(formulaId));
@@ -169,7 +169,8 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
     const handleDiscardChanges = (formulaId: string) => {
         const snapshot = formulaSnapshots[formulaId];
         if (snapshot) {
-            store.setFormulaTokens(calculatorId, formulaId, snapshot);
+            store.setFormulaTokens(calculatorId, formulaId, snapshot.tokens);
+            updateFormula(calculatorId, formulaId, { label: snapshot.label });
         }
         setEditingFormulaIds((prev) => {
             const next = new Set(prev);
@@ -760,9 +761,10 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                                 }
                                 hasChanges={(() => {
                                     const snap = formulaSnapshots[formula.id];
-                                    if (!snap) return formula.tokens.length > 0;
-                                    if (snap.length !== formula.tokens.length) return true;
-                                    return snap.some((t, i) => t.type !== formula.tokens[i]?.type || t.value !== formula.tokens[i]?.value);
+                                    if (!snap) return formula.tokens.length > 0 || formula.label !== 'New Formula';
+                                    if (snap.label !== formula.label) return true;
+                                    if (snap.tokens.length !== formula.tokens.length) return true;
+                                    return snap.tokens.some((t, i) => t.type !== formula.tokens[i]?.type || t.value !== formula.tokens[i]?.value);
                                 })()}
                                 onSaveFormula={() => handleSaveFormula(formula.id)}
                                 onStartEditing={() => handleStartEditing(formula.id)}
@@ -819,8 +821,8 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                                 </div>
 
                                 {/* Profit % & GST % inputs with hide toggles */}
-                                {sortedFormulas.some((f) => f.isTotal) && (
-                                    <div className="mt-3 pt-3 border-t border-black/5 flex items-center gap-5 flex-wrap">
+                                {sortedFormulas.length > 0 && (
+                                    <div className={`mt-3 pt-3 border-t ${!sortedFormulas.some((f) => f.isTotal) ? 'border-red-200' : 'border-black/5'} flex items-center gap-5 flex-wrap`}>
                                         <div className="flex items-center gap-2">
                                             <label className="text-[11px] font-semibold text-black/40 shrink-0">
                                                 Profit %
@@ -835,7 +837,7 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                                                         updateCalculator(calculatorId, { profitPercent: v });
                                                     }}
                                                     placeholder="0"
-                                                    className="w-20 text-sm font-mono font-semibold text-black bg-black/[0.03] rounded-lg px-3 py-1.5 pr-7 outline-none focus:ring-2 focus:ring-emerald-200 border border-black/5"
+                                                    className={`w-20 text-sm font-mono font-semibold text-black bg-black/[0.03] rounded-lg px-3 py-1.5 pr-7 outline-none focus:ring-2 focus:ring-emerald-200 border ${!calc.profitPercent ? 'border-red-300 ring-1 ring-red-200' : 'border-black/5'}`}
                                                 />
                                                 <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-black/30 font-bold">%</span>
                                             </div>
@@ -864,7 +866,7 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                                                         updateCalculator(calculatorId, { gstPercent: v });
                                                     }}
                                                     placeholder="0"
-                                                    className="w-20 text-sm font-mono font-semibold text-black bg-black/[0.03] rounded-lg px-3 py-1.5 pr-7 outline-none focus:ring-2 focus:ring-blue-200 border border-black/5"
+                                                    className={`w-20 text-sm font-mono font-semibold text-black bg-black/[0.03] rounded-lg px-3 py-1.5 pr-7 outline-none focus:ring-2 focus:ring-blue-200 border ${!calc.gstPercent ? 'border-red-300 ring-1 ring-red-200' : 'border-black/5'}`}
                                                 />
                                                 <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-black/30 font-bold">%</span>
                                             </div>
@@ -945,6 +947,28 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                                             </span>
                                         </div>
                                     )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ═══ Required Fields Checklist ═══ */}
+                        {sortedFormulas.length > 0 && (
+                            <div className="bg-white rounded-2xl border border-black/8 p-4">
+                                <p className="text-[10px] font-bold text-black/40 uppercase tracking-wider mb-2.5 px-1">
+                                    ✅ Setup Checklist
+                                </p>
+                                <div className="space-y-1.5">
+                                    {[
+                                        { done: sortedFormulas.length > 0, label: 'At least one formula created' },
+                                        { done: sortedFormulas.some((f) => f.isTotal), label: 'Grand total formula selected' },
+                                        { done: !!calc.profitPercent && parseFloat(calc.profitPercent) > 0, label: 'Profit % entered' },
+                                        { done: !!calc.gstPercent && parseFloat(calc.gstPercent) > 0, label: 'GST % entered' },
+                                    ].map((item) => (
+                                        <div key={item.label} className={`flex items-center gap-2 text-xs px-2 py-1 rounded-md ${item.done ? 'text-emerald-600' : 'text-red-500 bg-red-50'}`}>
+                                            <span className="text-sm">{item.done ? '✓' : '✗'}</span>
+                                            <span className={item.done ? 'line-through opacity-60' : 'font-medium'}>{item.label}</span>
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
                         )}

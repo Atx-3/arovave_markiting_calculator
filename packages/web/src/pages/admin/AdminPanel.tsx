@@ -13,6 +13,7 @@ import {
     X,
     AlertTriangle,
     Copy,
+    ClipboardCheck,
     MoreHorizontal,
     Percent,
 } from 'lucide-react';
@@ -32,6 +33,7 @@ export function AdminPanel() {
     const [calcNameDraft, setCalcNameDraft] = useState('');
     const [showDeleteCalcModal, setShowDeleteCalcModal] = useState(false);
     const [showCalcActions, setShowCalcActions] = useState<string | null>(null);
+    const [copiedCalcId, setCopiedCalcId] = useState<string | null>(null);
 
     const store = useAppStore();
     const {
@@ -39,6 +41,7 @@ export function AdminPanel() {
         calculators,
         createCalculator,
         deleteCalculator,
+        duplicateCalculator,
         getCalculatorsForCategory,
         getCategoryBreadcrumb,
     } = store;
@@ -46,6 +49,7 @@ export function AdminPanel() {
     const selectedCategory = categories.find((c) => c.id === selectedCategoryId);
     const categoryCalcs = selectedCategoryId ? getCalculatorsForCategory(selectedCategoryId) : [];
     const selectedCalc = selectedCalcId ? calculators.find((c) => c.id === selectedCalcId) : undefined;
+    const copiedCalc = copiedCalcId ? calculators.find((c) => c.id === copiedCalcId) : undefined;
 
     const handleSelectCategory = (id: string) => {
         setSelectedCategoryId(id);
@@ -204,6 +208,42 @@ export function AdminPanel() {
                                     </div>
                                 </div>
 
+                                {/* Clipboard indicator + Paste button */}
+                                {copiedCalc && (
+                                    <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 animate-slide-up">
+                                        <div className="flex items-center gap-2 text-xs text-blue-700">
+                                            <Copy className="w-3.5 h-3.5" />
+                                            <span>
+                                                <strong>"{copiedCalc.name}"</strong> copied
+                                            </span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            {selectedCategoryId && (
+                                                <button
+                                                    onClick={() => {
+                                                        const newId = duplicateCalculator(copiedCalcId!, selectedCategoryId);
+                                                        if (newId) {
+                                                            setSelectedCalcId(newId);
+                                                            setCopiedCalcId(null);
+                                                        }
+                                                    }}
+                                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 transition-colors"
+                                                >
+                                                    <ClipboardCheck className="w-3 h-3" />
+                                                    Paste Here
+                                                </button>
+                                            )}
+                                            <button
+                                                onClick={() => setCopiedCalcId(null)}
+                                                className="p-1 rounded-md text-blue-400 hover:text-blue-700 transition-colors"
+                                                title="Cancel copy"
+                                            >
+                                                <X className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+
                                 {/* Calculator Tabs (when multiple exist) */}
                                 {categoryCalcs.length > 0 && (
                                     <div className="flex items-center gap-2.5 flex-wrap p-1 bg-black/[0.02] rounded-2xl">
@@ -244,11 +284,14 @@ export function AdminPanel() {
                                                         <div className="fixed inset-0 z-40" onClick={() => setShowCalcActions(null)} />
                                                         <div className="absolute top-full right-0 mt-1 z-50 bg-white rounded-xl shadow-xl shadow-black/10 border border-black/8 p-1 min-w-[140px] animate-slide-up">
                                                             <button
-                                                                onClick={() => handleDuplicateCalc(calc.id)}
+                                                                onClick={() => {
+                                                                    setCopiedCalcId(calc.id);
+                                                                    setShowCalcActions(null);
+                                                                }}
                                                                 className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium text-black/60 hover:text-black hover:bg-black/[0.03] transition-colors"
                                                             >
                                                                 <Copy className="w-3 h-3" />
-                                                                Duplicate
+                                                                Copy
                                                             </button>
                                                             <button
                                                                 onClick={() => {
@@ -339,6 +382,15 @@ export function AdminPanel() {
                                                     <span>{selectedCalc.usedInputIds.length} inputs</span>
                                                 </div>
 
+                                                {/* Copy */}
+                                                <button
+                                                    onClick={() => setCopiedCalcId(selectedCalc.id)}
+                                                    className="p-1.5 rounded-lg text-black/15 hover:text-blue-500 hover:bg-blue-50 transition-colors"
+                                                    title="Copy calculator"
+                                                >
+                                                    <Copy className="w-3.5 h-3.5" />
+                                                </button>
+
                                                 {/* Delete */}
                                                 <button
                                                     onClick={() => setShowDeleteCalcModal(true)}
@@ -349,6 +401,39 @@ export function AdminPanel() {
                                                 </button>
                                             </div>
                                         </div>
+
+                                        {/* Duplicate name warning */}
+                                        {(() => {
+                                            const dupeCalcName = calculators.some((c) => c.id !== selectedCalc.id && !c.isCharge && c.name === selectedCalc.name);
+                                            // Find formula labels that exist in other calculators
+                                            const otherFormulaLabels = new Set(
+                                                calculators
+                                                    .filter((c) => c.id !== selectedCalc.id && !c.isCharge)
+                                                    .flatMap((c) => c.formulas.map((f) => f.label.toLowerCase()))
+                                            );
+                                            const dupeFormulaLabels = selectedCalc.formulas
+                                                .filter((f) => f.label && otherFormulaLabels.has(f.label.toLowerCase()))
+                                                .map((f) => f.label);
+
+                                            if (!dupeCalcName && dupeFormulaLabels.length === 0) return null;
+
+                                            return (
+                                                <div className="px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs space-y-1.5">
+                                                    <div className="flex items-center gap-2 font-semibold">
+                                                        <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+                                                        Rename required — duplicate names detected
+                                                    </div>
+                                                    <ul className="list-disc list-inside ml-6 space-y-0.5 text-amber-700">
+                                                        {dupeCalcName && (
+                                                            <li>Calculator name <strong>"{selectedCalc.name}"</strong> is already used by another calculator</li>
+                                                        )}
+                                                        {dupeFormulaLabels.map((label) => (
+                                                            <li key={label}>Formula <strong>"{label}"</strong> has the same name in another calculator</li>
+                                                        ))}
+                                                    </ul>
+                                                </div>
+                                            );
+                                        })()}
 
                                         {/* Builder */}
                                         <DragDropCalculatorBuilder calculatorId={selectedCalc.id} />

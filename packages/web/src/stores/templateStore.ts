@@ -80,6 +80,7 @@ interface AppStore {
     // ── Additional Charges (linked to a parent calculator) ──
     createCharge: (parentCalcId: string, name: string) => string;
     getChargesForCalculator: (calcId: string) => Calculator[];
+    duplicateCalculator: (calcId: string, targetCategoryId: string) => string;
 
     // ── Calculator Formulas ──
     addFormula: (calcId: string) => string;
@@ -468,6 +469,82 @@ export const useAppStore = create<AppStore>()(
 
             getChargesForCalculator(calcId) {
                 return get().calculators.filter((c) => c.isCharge && c.parentCalcId === calcId);
+            },
+
+            duplicateCalculator(calcId, targetCategoryId) {
+                const source = get().calculators.find((c) => c.id === calcId);
+                if (!source) return '';
+
+                // Helper: clone a single calculator (or charge) with new IDs
+                const cloneCalc = (
+                    src: Calculator,
+                    overrides: Partial<Calculator>,
+                ): Calculator => {
+                    const newId = uid();
+
+                    // Build old→new formula ID map
+                    const formulaIdMap: Record<string, string> = {};
+                    src.formulas.forEach((f) => {
+                        formulaIdMap[f.id] = uid();
+                    });
+
+                    // Clone formulas with new IDs and remapped formula_ref tokens
+                    const newFormulas: CalculatorFormula[] = src.formulas.map((f) => ({
+                        ...f,
+                        id: formulaIdMap[f.id],
+                        key: labelToKey(f.label) + '_' + formulaIdMap[f.id].slice(0, 4),
+                        tokens: f.tokens.map((t) => {
+                            if (t.type === 'formula_ref' && formulaIdMap[t.value]) {
+                                return { ...t, value: formulaIdMap[t.value] };
+                            }
+                            return { ...t };
+                        }),
+                    }));
+
+                    // Clone local rates with new IDs
+                    const newLocalRates: LocalRate[] = src.localRates.map((lr) => ({
+                        ...lr,
+                        id: uid(),
+                    }));
+
+                    return {
+                        ...src,
+                        id: newId,
+                        formulas: newFormulas,
+                        localRates: newLocalRates,
+                        usedInputIds: [...src.usedInputIds],
+                        ...overrides,
+                    };
+                };
+
+                // Clone the main calculator
+                const newCalc = cloneCalc(source, {
+                    name: source.name + ' (Copy)',
+                    categoryId: targetCategoryId,
+                });
+
+                // Clone all linked charges
+                const charges = get().calculators.filter(
+                    (c) => c.isCharge && c.parentCalcId === calcId,
+                );
+                const newCharges = charges.map((charge) =>
+                    cloneCalc(charge, {
+                        categoryId: targetCategoryId,
+                        isCharge: true,
+                        parentCalcId: newCalc.id,
+                    }),
+                );
+
+                // Push all new calculators at once
+                set({
+                    calculators: [
+                        ...get().calculators,
+                        newCalc,
+                        ...newCharges,
+                    ],
+                });
+
+                return newCalc.id;
             },
 
             // ══════════════════════════════════════════════════════════════════
