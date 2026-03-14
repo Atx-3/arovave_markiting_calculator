@@ -480,7 +480,7 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                 </button>
             </div>
 
-        <div className="flex gap-5 min-h-[500px]">
+        <div className="flex gap-5 min-h-[500px] overflow-hidden">
             {/* ─── Left Sidebar: Available Inputs ─── */}
             <div className="w-56 shrink-0 space-y-3">
                 <h3 className="text-xs font-bold text-black/50 uppercase tracking-wider px-1">
@@ -665,7 +665,7 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
             </div>
 
             {/* ─── Center: Formula Canvas ─── */}
-            <div className="flex-1 space-y-4">
+            <div className="flex-1 min-w-0 space-y-4">
                 <div className="flex items-center justify-between">
                     <h3 className="text-xs font-bold text-black/50 uppercase tracking-wider flex items-center gap-2">
                         Formulas

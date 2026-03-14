@@ -526,33 +526,52 @@ export function SalesCalculator() {
                                     )}
 
                                     {/* Grand Total Discount Input */}
-                                    {currentCalc.enableGrandDiscount && parseFloat(currentCalc.grandDiscountMaxPercent || '0') > 0 && (
-                                        <div className="px-5 py-3 border-t border-emerald-200/40">
-                                            <div className="flex items-center gap-3">
-                                                <span className="text-xs font-semibold text-teal-600 flex items-center gap-1.5">
-                                                    <Percent className="w-3 h-3" />
-                                                    Grand Discount
-                                                </span>
-                                                <div className="relative">
-                                                    <input
-                                                        type="text"
-                                                        inputMode="decimal"
-                                                        value={grandDiscountInput}
-                                                        onChange={(e) => {
-                                                            const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
-                                                            setGrandDiscountInput(v);
-                                                        }}
-                                                        placeholder={`${currentCalc.grandDiscountMinPercent || '0'}–${currentCalc.grandDiscountMaxPercent || '0'}`}
-                                                        className="w-20 text-sm font-mono font-semibold text-teal-700 bg-teal-50/50 border border-teal-200 rounded-lg px-2.5 py-1.5 pr-6 outline-none focus:ring-2 focus:ring-teal-200"
-                                                    />
-                                                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-teal-400 font-bold">%</span>
+                                    {currentCalc.enableGrandDiscount && parseFloat(currentCalc.grandDiscountMaxPercent || '0') > 0 && (() => {
+                                        const gdMin = parseFloat(currentCalc.grandDiscountMinPercent || '0') || 0;
+                                        const gdMax = parseFloat(currentCalc.grandDiscountMaxPercent || '0') || 0;
+                                        const gdVal = parseFloat(grandDiscountInput || '0') || 0;
+                                        const gdOutOfRange = grandDiscountInput !== '' && (gdVal < gdMin || gdVal > gdMax);
+
+                                        return (
+                                            <div className={`px-5 py-3 border-t ${gdOutOfRange ? 'border-red-200 bg-red-50/50' : 'border-emerald-200/40'}`}>
+                                                <div className="flex items-center gap-3">
+                                                    <span className="text-xs font-semibold text-teal-600 flex items-center gap-1.5">
+                                                        <Percent className="w-3 h-3" />
+                                                        Grand Discount
+                                                    </span>
+                                                    <div className="relative">
+                                                        <input
+                                                            type="text"
+                                                            inputMode="decimal"
+                                                            value={grandDiscountInput}
+                                                            onChange={(e) => {
+                                                                const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./, '$1');
+                                                                setGrandDiscountInput(v);
+                                                            }}
+                                                            placeholder={`${currentCalc.grandDiscountMinPercent || '0'}–${currentCalc.grandDiscountMaxPercent || '0'}`}
+                                                            className={`w-20 text-sm font-mono font-semibold bg-teal-50/50 rounded-lg px-2.5 py-1.5 pr-6 outline-none border transition-colors ${
+                                                                gdOutOfRange
+                                                                    ? 'border-red-300 text-red-600 focus:ring-2 focus:ring-red-200'
+                                                                    : 'border-teal-200 text-teal-700 focus:ring-2 focus:ring-teal-200'
+                                                            }`}
+                                                        />
+                                                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-teal-400 font-bold">%</span>
+                                                    </div>
+                                                    <span className="text-[10px] text-black/30">
+                                                        Range: {currentCalc.grandDiscountMinPercent || '0'}% – {currentCalc.grandDiscountMaxPercent || '0'}%
+                                                    </span>
                                                 </div>
-                                                <span className="text-[10px] text-black/30">
-                                                    Range: {currentCalc.grandDiscountMinPercent || '0'}% – {currentCalc.grandDiscountMaxPercent || '0'}%
-                                                </span>
+                                                {gdOutOfRange && (
+                                                    <div className="mt-1.5 flex items-center gap-1.5 text-red-500">
+                                                        <AlertTriangle className="w-3 h-3" />
+                                                        <span className="text-[10px] font-semibold">
+                                                            Discount must be between {gdMin}% and {gdMax}%
+                                                        </span>
+                                                    </div>
+                                                )}
                                             </div>
-                                        </div>
-                                    )}
+                                        );
+                                    })()}
 
                                     {/* Grand Total */}
                                     <div className={`px-5 ${(activeCharges.length > 0 || extraCharges.some((ec) => parseFloat(ec.amount) > 0) || totalDiscountAmount > 0 || grandDiscountAmount > 0) ? 'pt-1 pb-4' : 'py-4'} flex items-center justify-between`}>
