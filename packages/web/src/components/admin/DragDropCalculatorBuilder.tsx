@@ -105,9 +105,7 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
 
     const sortedFormulas = [...calc.formulas].sort((a, b) => a.order - b.order);
 
-    const [activeFormula, setActiveFormula] = useState<string | null>(
-        sortedFormulas.length > 0 ? sortedFormulas[0].id : null,
-    );
+    const [activeFormula, setActiveFormula] = useState<string | null>(null);
     const [dragOverFormula, setDragOverFormula] = useState(false);
 
     // ── Formula Save/Edit/Discard state ──
@@ -119,6 +117,21 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
     const [formulaSnapshots, setFormulaSnapshots] = useState<Record<string, FormulaToken[]>>({});
     // Discard confirmation state
     const [showDiscardConfirm, setShowDiscardConfirm] = useState<string | null>(null);
+
+    // ── Cursor tracking per formula (lifted from FormulaCard) ──
+    const [formulaCursors, setFormulaCursors] = useState<Record<string, number>>({});
+    const getCursor = (formulaId: string, tokensLen: number) => {
+        const c = formulaCursors[formulaId];
+        return c !== undefined ? Math.min(c, tokensLen) : tokensLen;
+    };
+    const setCursor = (formulaId: string, pos: number) => {
+        setFormulaCursors(prev => ({ ...prev, [formulaId]: pos }));
+    };
+
+    // ── Preview / Reorder state ──
+    const [showPreview, setShowPreview] = useState(false);
+    const [dragReorderIdx, setDragReorderIdx] = useState<number | null>(null);
+    const [overReorderIdx, setOverReorderIdx] = useState<number | null>(null);
 
     // Determine if a formula is in editing mode
     const isFormulaEditing = (formulaId: string) => editingFormulaIds.has(formulaId);
@@ -213,6 +226,11 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
         if (!targetFormulaId || !calc.formulas.find((f) => f.id === targetFormulaId)) {
             targetFormulaId = addFormula(calculatorId);
             setActiveFormula(targetFormulaId);
+            // New formulas start in editing mode
+            setEditingFormulaIds((prev) => new Set(prev).add(targetFormulaId!));
+        } else if (!editingFormulaIds.has(targetFormulaId)) {
+            // Can't drop onto a saved (non-editing) formula
+            return;
         }
 
         const currentCalc = useAppStore.getState().calculators.find((c) => c.id === calculatorId);
@@ -242,7 +260,11 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
             };
         }
 
-        store.setFormulaTokens(calculatorId, targetFormulaId, [...formula.tokens, newToken]);
+        const curPos = getCursor(targetFormulaId, formula.tokens.length);
+        const newTokens = [...formula.tokens];
+        newTokens.splice(curPos, 0, newToken);
+        store.setFormulaTokens(calculatorId, targetFormulaId, newTokens);
+        setCursor(targetFormulaId, curPos + 1);
     };
 
     const insertTokenInFormula = (formulaId: string, index: number, token: FormulaToken) => {
@@ -279,7 +301,184 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
         setEditingFormulaIds((prev) => new Set(prev).add(newId));
     };
 
+    // ── Preview & Reorder Mode ──
+    if (showPreview) {
+        return (
+            <div className="space-y-5">
+                <div className="flex items-center justify-end">
+                    <button
+                        onClick={() => setShowPreview(false)}
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-blue-500 text-white shadow-md transition-all"
+                    >
+                        <Eye className="w-3.5 h-3.5" />
+                        Back to Builder
+                    </button>
+                </div>
+
+                <div>
+                    <h3 className="text-xs font-bold text-black/50 uppercase tracking-wider flex items-center gap-2 mb-1">
+                        <Eye className="w-4 h-4" />
+                        User-Facing Order
+                    </h3>
+                    <p className="text-[11px] text-black/30 mb-4">
+                        Drag to rearrange how inputs and formulas appear to users on the sales page.
+                    </p>
+                </div>
+
+                {/* Inputs section */}
+                <div>
+                    <h4 className="text-[10px] font-bold text-black/40 uppercase tracking-wider mb-2 px-1">📥 Inputs</h4>
+                    <div className="space-y-1">
+                        {calc.usedInputIds.map((inputId, idx) => {
+                            const inp = inputDefinitions.find((i) => i.id === inputId);
+                            if (!inp) return null;
+                            const TypeIcon = TYPE_ICON[inp.type] || Hash;
+                            const isDragging = dragReorderIdx === idx;
+                            const isOver = overReorderIdx === idx && dragReorderIdx !== idx;
+                            return (
+                                <div
+                                    key={inputId}
+                                    draggable
+                                    onDragStart={() => setDragReorderIdx(idx)}
+                                    onDragOver={(e) => { e.preventDefault(); setOverReorderIdx(idx); }}
+                                    onDrop={() => {
+                                        if (dragReorderIdx !== null && dragReorderIdx !== idx && dragReorderIdx < calc.usedInputIds.length) {
+                                            const ids = [...calc.usedInputIds];
+                                            const [moved] = ids.splice(dragReorderIdx, 1);
+                                            ids.splice(idx, 0, moved);
+                                            updateCalculator(calculatorId, { usedInputIds: ids });
+                                        }
+                                        setDragReorderIdx(null);
+                                        setOverReorderIdx(null);
+                                    }}
+                                    onDragEnd={() => { setDragReorderIdx(null); setOverReorderIdx(null); }}
+                                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all select-none cursor-grab active:cursor-grabbing ${
+                                        isDragging
+                                            ? 'opacity-40 scale-95 border-blue-300 bg-blue-50/30'
+                                            : isOver
+                                                ? 'border-blue-400 bg-blue-50/50 shadow-md'
+                                                : 'border-black/8 bg-white hover:border-black/15'
+                                    }`}
+                                >
+                                    <GripVertical className="w-3.5 h-3.5 text-black/20 shrink-0" />
+                                    <span className="text-[10px] font-bold w-5 h-5 rounded-md bg-black/5 text-black/40 flex items-center justify-center shrink-0">
+                                        {idx + 1}
+                                    </span>
+                                    <TypeIcon className="w-3.5 h-3.5 text-black/30 shrink-0" />
+                                    <span className="text-sm font-medium text-black flex-1">{inp.name}</span>
+                                    <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-md ${
+                                        inp.type === 'number' ? 'bg-blue-50 text-blue-500' :
+                                        inp.type === 'dropdown' ? 'bg-violet-50 text-violet-500' :
+                                        'bg-emerald-50 text-emerald-500'
+                                    }`}>{inp.type}</span>
+                                    {inp.hidden && <span className="text-[9px] font-bold text-amber-500 bg-amber-50 px-1.5 py-0.5 rounded-md">Hidden</span>}
+                                </div>
+                            );
+                        })}
+                        {calc.usedInputIds.length === 0 && (
+                            <div className="text-center py-4 text-black/25 text-xs">No inputs added</div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Formulas section */}
+                <div>
+                    <h4 className="text-[10px] font-bold text-black/40 uppercase tracking-wider mb-2 px-1">📐 Formulas</h4>
+                    <div className="space-y-1">
+                        {sortedFormulas.map((formula, idx) => {
+                            const fDragIdx = calc.usedInputIds.length + idx;
+                            const isDragging = dragReorderIdx === fDragIdx;
+                            const isOver = overReorderIdx === fDragIdx && dragReorderIdx !== fDragIdx;
+                            return (
+                                <div
+                                    key={formula.id}
+                                    draggable
+                                    onDragStart={() => setDragReorderIdx(fDragIdx)}
+                                    onDragOver={(e) => { e.preventDefault(); setOverReorderIdx(fDragIdx); }}
+                                    onDrop={() => {
+                                        const fSrcIdx = dragReorderIdx !== null ? dragReorderIdx - calc.usedInputIds.length : null;
+                                        const fTargetIdx = idx;
+                                        if (fSrcIdx !== null && fSrcIdx >= 0 && fSrcIdx !== fTargetIdx && fSrcIdx < sortedFormulas.length) {
+                                            const ordered = [...sortedFormulas];
+                                            const [moved] = ordered.splice(fSrcIdx, 1);
+                                            ordered.splice(fTargetIdx, 0, moved);
+                                            ordered.forEach((f, i) => {
+                                                updateFormula(calculatorId, f.id, { order: i });
+                                            });
+                                        }
+                                        setDragReorderIdx(null);
+                                        setOverReorderIdx(null);
+                                    }}
+                                    onDragEnd={() => { setDragReorderIdx(null); setOverReorderIdx(null); }}
+                                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all select-none cursor-grab active:cursor-grabbing ${
+                                        isDragging
+                                            ? 'opacity-40 scale-95 border-emerald-300 bg-emerald-50/30'
+                                            : isOver
+                                                ? 'border-emerald-400 bg-emerald-50/50 shadow-md'
+                                                : 'border-black/8 bg-white hover:border-black/15'
+                                    }`}
+                                >
+                                    <GripVertical className="w-3.5 h-3.5 text-black/20 shrink-0" />
+                                    <span className="text-[10px] font-bold w-5 h-5 rounded-md bg-emerald-50 text-emerald-500 flex items-center justify-center shrink-0">
+                                        {idx + 1}
+                                    </span>
+                                    <Zap className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                    <span className="text-sm font-medium text-black flex-1">{formula.label}</span>
+                                    {formula.isTotal && <span className="text-[9px] font-bold text-emerald-500 bg-emerald-50 px-1.5 py-0.5 rounded-md">🏆 Total</span>}
+                                    {formula.hidden && <span className="text-[9px] font-bold text-amber-500 bg-amber-50 px-1.5 py-0.5 rounded-md">Hidden</span>}
+                                    <span className="text-[10px] text-black/30 font-mono">
+                                        {formula.tokens.length} tokens
+                                    </span>
+                                </div>
+                            );
+                        })}
+                        {sortedFormulas.length === 0 && (
+                            <div className="text-center py-4 text-black/25 text-xs">No formulas yet</div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Config summary */}
+                {(calc.profitPercent || calc.gstPercent || calc.enableDiscount) && (
+                    <div className="rounded-xl border border-black/8 bg-black/[0.02] p-3 space-y-1">
+                        <h4 className="text-[10px] font-bold text-black/40 uppercase tracking-wider mb-1">⚙️ Additional Config</h4>
+                        {calc.profitPercent && (
+                            <div className="flex items-center justify-between text-xs">
+                                <span className="text-black/50">Profit</span>
+                                <span className="font-mono font-semibold text-black/70">{calc.profitPercent}% {calc.hideProfit ? '(hidden)' : ''}</span>
+                            </div>
+                        )}
+                        {calc.gstPercent && (
+                            <div className="flex items-center justify-between text-xs">
+                                <span className="text-black/50">GST</span>
+                                <span className="font-mono font-semibold text-black/70">{calc.gstPercent}% {calc.hideGst ? '(hidden)' : ''}</span>
+                            </div>
+                        )}
+                        {calc.enableDiscount && (
+                            <div className="flex items-center justify-between text-xs">
+                                <span className="text-black/50">Discount</span>
+                                <span className="font-mono font-semibold text-black/70">{calc.discountMinPercent || '0'}% – {calc.discountMaxPercent || '0'}%</span>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+        );
+    }
+
     return (
+        <>
+            {/* Preview Toggle Button */}
+            <div className="flex items-center justify-end mb-4">
+                <button
+                    onClick={() => setShowPreview(true)}
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-black/[0.04] text-black/50 hover:bg-black/[0.08] hover:text-black/70 transition-all"
+                >
+                    <Eye className="w-3.5 h-3.5" />
+                    Preview & Reorder
+                </button>
+            </div>
+
         <div className="flex gap-5 min-h-[500px]">
             {/* ─── Left Sidebar: Available Inputs ─── */}
             <div className="w-56 shrink-0 space-y-3">
@@ -315,14 +514,20 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                                             if (!targetId || !calc.formulas.find((f) => f.id === targetId)) {
                                                 targetId = addFormula(calculatorId);
                                                 setActiveFormula(targetId);
+                                                setEditingFormulaIds((prev) => new Set(prev).add(targetId!));
+                                            } else if (!editingFormulaIds.has(targetId)) {
+                                                // Can't add to a saved formula — need to click Edit first
+                                                return;
                                             }
                                             addUsedInput(calculatorId, input.id);
                                             const targetFormula = calc.formulas.find((f) => f.id === targetId);
-                                            insertTokenInFormula(targetId, targetFormula?.tokens.length || 0, {
+                                            const curPos = getCursor(targetId, targetFormula?.tokens.length || 0);
+                                            insertTokenInFormula(targetId, curPos, {
                                                 type: 'input',
                                                 value: input.id,
                                                 label: input.name,
                                             });
+                                            setCursor(targetId, curPos + 1);
                                         }}
                                         className={`flex items-center gap-2 px-3 py-2.5 rounded-xl border cursor-grab active:cursor-grabbing transition-all group select-none ${isUsed
                                             ? 'bg-blue-50/30 border-blue-200/40 hover:border-blue-300/60'
@@ -362,7 +567,7 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                                         draggable
                                         onDragStart={(e) => handleFormulaDragStart(e, f.id, f.label)}
                                         onClick={() => {
-                                            if (!activeFormula) return;
+                                            if (!activeFormula || !editingFormulaIds.has(activeFormula)) return;
                                             const targetFormula = calc.formulas.find((fm) => fm.id === activeFormula);
                                             insertTokenInFormula(activeFormula, targetFormula?.tokens.length || 0, {
                                                 type: 'formula_ref',
@@ -383,6 +588,79 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                         </div>
                     </>
                 )}
+
+                {/* External formulas: parent calculator + sibling charges (only for charge calculators) */}
+                {calc.isCharge && calc.parentCalcId && (() => {
+                    const parentCalc = calculators.find((c) => c.id === calc.parentCalcId);
+                    if (!parentCalc) return null;
+
+                    // Collect all related calculators: parent + sibling charges (excluding self)
+                    const siblingCharges = calculators.filter(
+                        (c) => c.isCharge && c.parentCalcId === calc.parentCalcId && c.id !== calculatorId
+                    );
+                    const relatedCalcs = [parentCalc, ...siblingCharges]
+                        .filter((c) => c.formulas.length > 0);
+
+                    if (relatedCalcs.length === 0) return null;
+
+                    return (
+                        <>
+                            <div className="h-px bg-black/5 my-3" />
+                            <h3 className="text-xs font-bold text-black/50 uppercase tracking-wider px-1">
+                                Reference Formulas
+                            </h3>
+                            <p className="text-[11px] text-black/30 px-1">
+                                Drag or click to use in your formulas
+                            </p>
+                            <div className="space-y-3">
+                                {relatedCalcs.map((relCalc) => {
+                                    const isParent = relCalc.id === parentCalc.id;
+                                    const relFormulas = [...relCalc.formulas].sort((a, b) => a.order - b.order);
+                                    return (
+                                        <div key={relCalc.id} className="space-y-1.5">
+                                            <span className={`text-[10px] font-bold uppercase tracking-wider px-1 ${isParent ? 'text-amber-600/70' : 'text-blue-500/70'}`}>
+                                                {relCalc.name}
+                                            </span>
+                                            {relFormulas.map((f) => (
+                                                <div
+                                                    key={f.id}
+                                                    draggable
+                                                    onDragStart={(e) => handleFormulaDragStart(e, f.id, f.label)}
+                                                    onClick={() => {
+                                                        if (!activeFormula || !editingFormulaIds.has(activeFormula)) return;
+                                                        const targetFormula = calc.formulas.find((fm) => fm.id === activeFormula);
+                                                        insertTokenInFormula(activeFormula, targetFormula?.tokens.length || 0, {
+                                                            type: 'formula_ref',
+                                                            value: f.id,
+                                                            label: f.label,
+                                                        });
+                                                    }}
+                                                    className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-xl border text-left transition-colors group cursor-grab active:cursor-grabbing select-none ${
+                                                        isParent
+                                                            ? 'bg-amber-50/50 border-amber-200/50 hover:border-amber-300'
+                                                            : 'bg-blue-50/50 border-blue-200/50 hover:border-blue-300'
+                                                    }`}
+                                                    title={`Drag or click to use result of ${f.label} from ${relCalc.name}`}
+                                                >
+                                                    <GripVertical className={`w-3 h-3 shrink-0 ${isParent ? 'text-amber-300 group-hover:text-amber-500' : 'text-blue-300 group-hover:text-blue-500'}`} />
+                                                    <Combine className={`w-3 h-3 shrink-0 ${isParent ? 'text-amber-500' : 'text-blue-500'}`} />
+                                                    <span className={`text-xs font-medium truncate ${isParent ? 'text-amber-700' : 'text-blue-700'}`}>
+                                                        {f.label}
+                                                    </span>
+                                                    {f.isTotal && (
+                                                        <span className={`text-[8px] px-1 py-0.5 rounded font-bold shrink-0 ${isParent ? 'bg-amber-200/60 text-amber-700' : 'bg-blue-200/60 text-blue-700'}`}>
+                                                            TOTAL
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </>
+                    );
+                })()}
             </div>
 
             {/* ─── Center: Formula Canvas ─── */}
@@ -443,7 +721,7 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                                 isDragOver={activeFormula === formula.id && dragOverFormula}
                                 isEditing={isFormulaEditing(formula.id)}
                                 showDiscardConfirm={showDiscardConfirm === formula.id}
-                                onActivate={() => setActiveFormula(formula.id)}
+                                onActivate={() => setActiveFormula(activeFormula === formula.id ? null : formula.id)}
                                 onRemove={() => {
                                     removeFormula(calculatorId, formula.id);
                                     setEditingFormulaIds((prev) => {
@@ -496,6 +774,8 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                                 onDragOver={handleDragOver}
                                 onDragLeave={handleDragLeave}
                                 onDrop={handleDrop}
+                                cursorIndex={getCursor(formula.id, formula.tokens.length)}
+                                onCursorChange={(pos: number) => setCursor(formula.id, pos)}
                             />
                         ))}
 
@@ -538,7 +818,7 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                                     ))}
                                 </div>
 
-                                {/* Profit % input */}
+                                {/* Profit % & GST % inputs with hide toggles */}
                                 {sortedFormulas.some((f) => f.isTotal) && (
                                     <div className="mt-3 pt-3 border-t border-black/5 flex items-center gap-5 flex-wrap">
                                         <div className="flex items-center gap-2">
@@ -551,7 +831,7 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                                                     inputMode="decimal"
                                                     value={calc.profitPercent || ''}
                                                     onChange={(e) => {
-                                                        const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./, '$1');
+                                                        const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./,  '$1');
                                                         updateCalculator(calculatorId, { profitPercent: v });
                                                     }}
                                                     placeholder="0"
@@ -559,6 +839,16 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                                                 />
                                                 <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-black/30 font-bold">%</span>
                                             </div>
+                                            <button
+                                                onClick={() => updateCalculator(calculatorId, { hideProfit: !calc.hideProfit })}
+                                                className={`p-1.5 rounded-lg transition-colors ${calc.hideProfit ? 'text-amber-500 hover:text-amber-600 bg-amber-50' : 'text-black/20 hover:text-black/50'}`}
+                                                title={calc.hideProfit ? 'Hidden from user — click to show' : 'Visible to user — click to hide'}
+                                            >
+                                                {calc.hideProfit ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                            </button>
+                                            {calc.hideProfit && (
+                                                <span className="text-[9px] font-bold uppercase tracking-wider text-amber-500 bg-amber-50 px-1.5 py-0.5 rounded-md">Hidden</span>
+                                            )}
                                         </div>
                                         <div className="flex items-center gap-2">
                                             <label className="text-[11px] font-semibold text-black/40 shrink-0">
@@ -570,7 +860,7 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                                                     inputMode="decimal"
                                                     value={calc.gstPercent || ''}
                                                     onChange={(e) => {
-                                                        const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./, '$1');
+                                                        const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./,  '$1');
                                                         updateCalculator(calculatorId, { gstPercent: v });
                                                     }}
                                                     placeholder="0"
@@ -578,18 +868,91 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                                                 />
                                                 <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-black/30 font-bold">%</span>
                                             </div>
+                                            <button
+                                                onClick={() => updateCalculator(calculatorId, { hideGst: !calc.hideGst })}
+                                                className={`p-1.5 rounded-lg transition-colors ${calc.hideGst ? 'text-amber-500 hover:text-amber-600 bg-amber-50' : 'text-black/20 hover:text-black/50'}`}
+                                                title={calc.hideGst ? 'Hidden from user — click to show' : 'Visible to user — click to hide'}
+                                            >
+                                                {calc.hideGst ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                            </button>
+                                            {calc.hideGst && (
+                                                <span className="text-[9px] font-bold uppercase tracking-wider text-amber-500 bg-amber-50 px-1.5 py-0.5 rounded-md">Hidden</span>
+                                            )}
                                         </div>
                                         <span className="text-[10px] text-black/25">
                                             Applied on this calculator's subtotal
                                         </span>
                                     </div>
                                 )}
+
+                                {/* Discount Range Config */}
+                                <div className="mt-3 pt-3 border-t border-black/5">
+                                    <div className="flex items-center gap-3">
+                                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                                            <input
+                                                type="checkbox"
+                                                checked={calc.enableDiscount || false}
+                                                onChange={(e) => updateCalculator(calculatorId, { enableDiscount: e.target.checked })}
+                                                className="w-4 h-4 rounded border-black/20 text-violet-500 focus:ring-violet-300 cursor-pointer"
+                                            />
+                                            <span className="text-[11px] font-semibold text-black/50">
+                                                Allow Discount
+                                            </span>
+                                        </label>
+                                        {calc.enableDiscount && (
+                                            <span className="text-[9px] font-bold uppercase tracking-wider text-violet-500 bg-violet-50 px-1.5 py-0.5 rounded-md">Active</span>
+                                        )}
+                                    </div>
+                                    {calc.enableDiscount && (
+                                        <div className="mt-2 flex items-center gap-3 flex-wrap">
+                                            <div className="flex items-center gap-1.5">
+                                                <span className="text-[10px] text-black/40 font-semibold">Min</span>
+                                                <div className="relative">
+                                                    <input
+                                                        type="text"
+                                                        inputMode="decimal"
+                                                        value={calc.discountMinPercent || ''}
+                                                        onChange={(e) => {
+                                                            const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./,  '$1');
+                                                            updateCalculator(calculatorId, { discountMinPercent: v });
+                                                        }}
+                                                        placeholder="0"
+                                                        className="w-16 text-sm font-mono font-semibold text-black bg-black/[0.03] rounded-lg px-2.5 py-1.5 pr-6 outline-none focus:ring-2 focus:ring-violet-200 border border-black/5"
+                                                    />
+                                                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-black/30 font-bold">%</span>
+                                                </div>
+                                            </div>
+                                            <span className="text-black/20 text-xs font-bold">to</span>
+                                            <div className="flex items-center gap-1.5">
+                                                <span className="text-[10px] text-black/40 font-semibold">Max</span>
+                                                <div className="relative">
+                                                    <input
+                                                        type="text"
+                                                        inputMode="decimal"
+                                                        value={calc.discountMaxPercent || ''}
+                                                        onChange={(e) => {
+                                                            const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./,  '$1');
+                                                            updateCalculator(calculatorId, { discountMaxPercent: v });
+                                                        }}
+                                                        placeholder="10"
+                                                        className="w-16 text-sm font-mono font-semibold text-black bg-black/[0.03] rounded-lg px-2.5 py-1.5 pr-6 outline-none focus:ring-2 focus:ring-violet-200 border border-black/5"
+                                                    />
+                                                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-black/30 font-bold">%</span>
+                                                </div>
+                                            </div>
+                                            <span className="text-[10px] text-black/25">
+                                                User can apply discount within this range
+                                            </span>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         )}
                     </div>
                 )}
             </div>
         </div>
+        </>
     );
 }
 
@@ -626,6 +989,8 @@ function FormulaCard({
     onDragOver,
     onDragLeave,
     onDrop,
+    cursorIndex,
+    onCursorChange,
 }: {
     calculatorId: string;
     formula: { id: string; label: string; tokens: FormulaToken[]; isTotal?: boolean; hidden?: boolean; order: number };
@@ -655,17 +1020,14 @@ function FormulaCard({
     onDragOver: (e: React.DragEvent) => void;
     onDragLeave: () => void;
     onDrop: (e: React.DragEvent) => void;
+    cursorIndex: number;
+    onCursorChange: (pos: number) => void;
 }) {
     const [showNumberInput, setShowNumberInput] = useState(false);
     const [numberValue, setNumberValue] = useState('');
-    const [cursorIndex, setCursorIndex] = useState(formula.tokens.length);
 
-    // Clamp cursor to valid range whenever tokens change
-    useEffect(() => {
-        if (cursorIndex > formula.tokens.length) {
-            setCursorIndex(formula.tokens.length);
-        }
-    }, [formula.tokens.length, cursorIndex]);
+    // Use cursor from parent props
+    const setCursorIndex = onCursorChange;
 
     const getInputName = (id: string) => {
         const input = inputDefinitions.find((i) => i.id === id);
@@ -945,9 +1307,9 @@ function FormulaCard({
                                         {/* Gap slot BEFORE this token */}
                                         <span
                                             onClick={(e) => { e.stopPropagation(); setCursorIndex(idx); }}
-                                            className={`w-1 self-stretch min-h-[28px] rounded-sm cursor-text transition-all mx-0.5 ${cursorIndex === idx
-                                                ? 'bg-blue-500 animate-pulse w-[3px]'
-                                                : 'hover:bg-blue-300 hover:w-[3px]'
+                                            className={`self-stretch min-h-[28px] cursor-text transition-all mx-0.5 ${cursorIndex === idx
+                                                ? 'w-[2px] bg-black animate-cursor-blink'
+                                                : 'w-1 hover:bg-blue-300/50 hover:w-[2px]'
                                                 }`}
                                             title="Click to place cursor here"
                                         />
@@ -961,9 +1323,9 @@ function FormulaCard({
                                 {/* Gap slot AFTER last token */}
                                 <span
                                     onClick={(e) => { e.stopPropagation(); setCursorIndex(formula.tokens.length); }}
-                                    className={`w-1 self-stretch min-h-[28px] rounded-sm cursor-text transition-all mx-0.5 flex-1 min-w-[12px] ${cursorIndex === formula.tokens.length
-                                        ? 'bg-blue-500 animate-pulse w-[3px] flex-initial'
-                                        : 'hover:bg-blue-300 hover:w-[3px]'
+                                    className={`self-stretch min-h-[28px] cursor-text transition-all mx-0.5 flex-1 min-w-[12px] ${cursorIndex === formula.tokens.length
+                                        ? 'w-[2px] bg-black animate-cursor-blink flex-initial'
+                                        : 'w-1 hover:bg-blue-300/50 hover:w-[2px]'
                                         }`}
                                     title="Click to place cursor at end"
                                 />
@@ -978,9 +1340,10 @@ function FormulaCard({
                             {OPERATORS.map((op) => (
                                 <button
                                     key={op.symbol}
-                                    onClick={() =>
-                                        insertAtCursor({ type: 'operator', value: op.symbol })
-                                    }
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        insertAtCursor({ type: 'operator', value: op.symbol });
+                                    }}
                                     className="w-8 h-8 flex items-center justify-center rounded-lg text-sm font-bold text-black/50 hover:text-black hover:bg-white hover:shadow-sm transition-all"
                                     title={op.label}
                                 >
@@ -994,9 +1357,10 @@ function FormulaCard({
                             {BRACKETS.map((b) => (
                                 <button
                                     key={b.symbol}
-                                    onClick={() =>
-                                        insertAtCursor({ type: 'bracket', value: b.symbol })
-                                    }
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        insertAtCursor({ type: 'bracket', value: b.symbol });
+                                    }}
                                     className="w-8 h-8 flex items-center justify-center rounded-lg text-sm font-bold text-black/40 hover:text-black hover:bg-white hover:shadow-sm transition-all"
                                     title={b.label}
                                 >
@@ -1022,7 +1386,7 @@ function FormulaCard({
                                     className="w-16 text-sm font-mono text-black bg-white border border-black/15 rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-black/10"
                                 />
                                 <button
-                                    onClick={handleAddNumber}
+                                    onClick={(e) => { e.stopPropagation(); handleAddNumber(); }}
                                     className="p-1.5 rounded-lg bg-black text-white hover:bg-black/80 transition-colors"
                                     title="Add number"
                                 >

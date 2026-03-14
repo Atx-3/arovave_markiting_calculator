@@ -111,6 +111,14 @@ export interface Calculator {
     usedInputIds: string[];
     profitPercent?: string; // Profit % added on top of subtotal
     gstPercent?: string;    // GST % added on top of (subtotal + profit)
+    hideProfit?: boolean;   // hide profit line from sales page
+    hideGst?: boolean;      // hide GST line from sales page
+    enableDiscount?: boolean;       // allow user to apply discount
+    discountMinPercent?: string;    // min allowed discount %
+    discountMaxPercent?: string;    // max allowed discount %
+    enableGrandDiscount?: boolean;       // allow discount on grand total (sum of all charges)
+    grandDiscountMinPercent?: string;    // min allowed grand discount %
+    grandDiscountMaxPercent?: string;    // max allowed grand discount %
     isCharge?: boolean;     // true = this is an additional charge, not a standalone calculator
     parentCalcId?: string;  // links charge to its parent calculator
 }

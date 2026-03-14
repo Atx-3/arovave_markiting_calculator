@@ -42,6 +42,7 @@ interface AppStore {
     deleteCategory: (id: string) => void;
     getCategoryChildren: (parentId: string | null) => Category[];
     getCategoryBreadcrumb: (id: string) => Category[];
+    reorderCategories: (orderedIds: string[]) => void;
 
     // ── Input Definitions (Centralized Hub) ──
     inputDefinitions: InputDefinition[];
@@ -103,6 +104,7 @@ interface AppStore {
         inputs: Record<string, string>,
         selectedDropdowns: Record<string, string>,
         userTempItems: UserTempItem[],
+        externalFormulaValues?: Record<string, string>,
     ) => {
         formulaResults: Record<string, string>;
         total: string;
@@ -148,6 +150,15 @@ export const useAppStore = create<AppStore>()(
                 set({
                     categories: get().categories.filter((c) => !toDelete.has(c.id)),
                     calculators: get().calculators.filter((c) => !toDelete.has(c.categoryId)),
+                });
+            },
+
+            reorderCategories(orderedIds) {
+                set({
+                    categories: get().categories.map((c) => {
+                        const idx = orderedIds.indexOf(c.id);
+                        return idx >= 0 ? { ...c, order: idx } : c;
+                    }),
                 });
             },
 
@@ -643,12 +654,23 @@ export const useAppStore = create<AppStore>()(
             // CALCULATION ENGINE
             // ══════════════════════════════════════════════════════════════════
 
-            calculateResult(calc, inputValues, selectedDropdowns, userTempItems) {
+            calculateResult(calc, inputValues, selectedDropdowns, userTempItems, externalFormulaValues) {
                 const inputDefs = get().inputDefinitions;
                 const formulaResults: Record<string, string> = {};
 
                 // Build a value map: input keys → their values
                 const valueMap: Record<string, Decimal> = {};
+
+                // Seed with external formula values (e.g. parent calculator results for charges)
+                if (externalFormulaValues) {
+                    for (const [id, val] of Object.entries(externalFormulaValues)) {
+                        try {
+                            valueMap[id] = new Decimal(val || '0');
+                        } catch {
+                            valueMap[id] = new Decimal(0);
+                        }
+                    }
+                }
 
                 // Populate from input definitions
                 for (const inputDef of inputDefs) {

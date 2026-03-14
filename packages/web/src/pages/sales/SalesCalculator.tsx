@@ -11,6 +11,7 @@ import {
     FileText,
     MessageCircle,
     AlertTriangle,
+    Percent,
 } from 'lucide-react';
 import { useAppStore } from '../../stores/templateStore';
 import type { RefTreeNode, Calculator as CalcType, InputDefinition } from '../../types/calculator';
@@ -44,6 +45,10 @@ export function SalesCalculator() {
     const [activeChargeIds, setActiveChargeIds] = useState<string[]>([]);
     // Temporary extra charges added by sales user (label + amount)
     const [extraCharges, setExtraCharges] = useState<{ id: string; label: string; amount: string }[]>([]);
+    // Discount state per calculator (keyed by calc id)
+    const [discountInputs, setDiscountInputs] = useState<Record<string, string>>({});
+    // Grand total discount state
+    const [grandDiscountInput, setGrandDiscountInput] = useState('');
     // Collapse state for charges
     const [collapsedCharges, setCollapsedCharges] = useState<Record<string, boolean>>({});
     // Reference sidebar
@@ -73,6 +78,7 @@ export function SalesCalculator() {
         setChargeDropdowns({});
         setActiveChargeIds([]);
         setCollapsedCharges({});
+        setDiscountInputs({});
         setFocusedInputId(null);
         setFocusedSourceId(null);
         setRefTreePath([]);
@@ -120,10 +126,20 @@ export function SalesCalculator() {
     // Per-charge results
     const chargeResults = useMemo(() => {
         const results: Record<string, { formulaResults: Record<string, string>; total: string; subtotal: number; profitAmount: number; afterProfit: number; gstAmount: number; finalAmount: number }> = {};
+
+        // Build external formula values from main calculator (keyed by formula ID)
+        const externalValues: Record<string, string> = {};
+        if (currentCalc && mainResult) {
+            for (const f of currentCalc.formulas) {
+                externalValues[f.id] = mainResult.formulaResults[f.key] || '0';
+            }
+        }
+
+        // Compute charges sequentially — each charge gets parent + all previous sibling formula values
         for (const charge of activeCharges) {
             const inputs = chargeInputs[charge.id] || {};
             const dropdowns = chargeDropdowns[charge.id] || {};
-            const result = calculateResult(charge, inputs, dropdowns, []);
+            const result = calculateResult(charge, inputs, dropdowns, [], { ...externalValues });
 
             const grandTotalFormula = charge.formulas.find((f) => f.isTotal);
             const subtotal = grandTotalFormula
@@ -138,17 +154,37 @@ export function SalesCalculator() {
             const finalAmount = afterProfit + gstAmount;
 
             results[charge.id] = { ...result, subtotal, profitAmount, afterProfit, gstAmount, finalAmount };
+
+            // Add this charge's formula results to externalValues for subsequent charges
+            for (const f of charge.formulas) {
+                externalValues[f.id] = result.formulaResults[f.key] || '0';
+            }
         }
         return results;
-    }, [activeCharges, chargeInputs, chargeDropdowns, calculateResult]);
+    }, [activeCharges, chargeInputs, chargeDropdowns, calculateResult, currentCalc, mainResult]);
 
     // Extra charges total
     const extraChargesTotal = useMemo(() => {
         return extraCharges.reduce((sum, ec) => sum + (parseFloat(ec.amount) || 0), 0);
     }, [extraCharges]);
 
-    // Grand total = main + all charges + extra charges
-    const grandTotal = useMemo(() => {
+    // Helper: apply discount to a finalAmount for a given calc id
+    const getDiscountedAmount = useCallback((calcId: string, finalAmount: number, calc: CalcType) => {
+        const discountInput = discountInputs[calcId] || '';
+        const discountMax = parseFloat(calc.discountMaxPercent || '0') || 0;
+        const discountMin = parseFloat(calc.discountMinPercent || '0') || 0;
+        const discountEnabled = calc.enableDiscount && discountMax > 0;
+        const discountVal = parseFloat(discountInput || '0') || 0;
+        const discountInRange = discountVal >= discountMin && discountVal <= discountMax;
+        const discountValid = discountEnabled && discountInput !== '' && discountInRange;
+        if (discountValid) {
+            return finalAmount * (1 - discountVal / 100);
+        }
+        return finalAmount;
+    }, [discountInputs]);
+
+    // Pre-discount grand total (sum of all finalAmounts without discount)
+    const preDiscountGrandTotal = useMemo(() => {
         let total = mainResult?.finalAmount || 0;
         for (const r of Object.values(chargeResults)) {
             total += r.finalAmount;
@@ -156,6 +192,40 @@ export function SalesCalculator() {
         total += extraChargesTotal;
         return total;
     }, [mainResult, chargeResults, extraChargesTotal]);
+
+    // Total discount amount across all sections
+    const totalDiscountAmount = useMemo(() => {
+        let discount = 0;
+        if (mainResult && currentCalc) {
+            discount += mainResult.finalAmount - getDiscountedAmount(currentCalc.id, mainResult.finalAmount, currentCalc);
+        }
+        for (const charge of activeCharges) {
+            const r = chargeResults[charge.id];
+            if (r) {
+                discount += r.finalAmount - getDiscountedAmount(charge.id, r.finalAmount, charge);
+            }
+        }
+        return discount;
+    }, [mainResult, currentCalc, activeCharges, chargeResults, getDiscountedAmount]);
+
+    // After per-section discounts
+    const afterSectionDiscounts = preDiscountGrandTotal - totalDiscountAmount;
+
+    // Grand total discount (applied on top of everything)
+    const grandDiscountAmount = useMemo(() => {
+        if (!currentCalc?.enableGrandDiscount) return 0;
+        const max = parseFloat(currentCalc.grandDiscountMaxPercent || '0') || 0;
+        const min = parseFloat(currentCalc.grandDiscountMinPercent || '0') || 0;
+        if (max <= 0) return 0;
+        const val = parseFloat(grandDiscountInput || '0') || 0;
+        if (val >= min && val <= max && grandDiscountInput !== '') {
+            return afterSectionDiscounts * (val / 100);
+        }
+        return 0;
+    }, [currentCalc, grandDiscountInput, afterSectionDiscounts]);
+
+    // Grand total = after section discounts - grand discount
+    const grandTotal = afterSectionDiscounts - grandDiscountAmount;
 
     // Reference sidebar
     const focusedInputDef = focusedInputId
@@ -299,6 +369,8 @@ export function SalesCalculator() {
                                     inputDefinitions={inputDefinitions}
                                     onSetInput={(key, val) => setMainInputs((prev) => ({ ...prev, [key]: val }))}
                                     onSetDropdown={(key, val) => setMainDropdowns((prev) => ({ ...prev, [key]: val }))}
+                                    discountInput={discountInputs[currentCalc.id] || ''}
+                                    onDiscountChange={(val) => setDiscountInputs((prev) => ({ ...prev, [currentCalc.id]: val }))}
                                     onFocusInput={(inputId) => {
                                         setFocusedInputId(inputId);
                                         setFocusedSourceId(currentCalc.id);
@@ -325,6 +397,8 @@ export function SalesCalculator() {
                                             inputDefinitions={inputDefinitions}
                                             onSetInput={(key, val) => setChargeInput(charge.id, key, val)}
                                             onSetDropdown={(key, val) => setChargeDropdown(charge.id, key, val)}
+                                            discountInput={discountInputs[charge.id] || ''}
+                                            onDiscountChange={(val) => setDiscountInputs((prev) => ({ ...prev, [charge.id]: val }))}
                                             onToggleCollapse={() => setCollapsedCharges((prev) => ({ ...prev, [charge.id]: !prev[charge.id] }))}
                                             onRemove={() => setActiveChargeIds((prev) => prev.filter((id) => id !== charge.id))}
                                             onFocusInput={(inputId) => {
@@ -398,8 +472,8 @@ export function SalesCalculator() {
 
                                 {/* ═══ GRAND TOTAL ═══ */}
                                 <div className="rounded-2xl overflow-hidden border-2 border-emerald-200 bg-gradient-to-r from-emerald-50 to-emerald-50/30">
-                                    {/* Per-section subtotals when there are active charges or extra charges */}
-                                    {(activeCharges.length > 0 || extraCharges.some((ec) => parseFloat(ec.amount) > 0)) && (
+                                    {/* Per-section subtotals when there are active charges or extra charges or discount */}
+                                    {(activeCharges.length > 0 || extraCharges.some((ec) => parseFloat(ec.amount) > 0) || totalDiscountAmount > 0 || grandDiscountAmount > 0) && (
                                         <div className="px-5 pt-4 pb-2 space-y-1">
                                             <div className="flex items-center justify-between text-sm">
                                                 <span className="text-emerald-700/70">{currentCalc.name}</span>
@@ -423,12 +497,65 @@ export function SalesCalculator() {
                                                     </span>
                                                 </div>
                                             ))}
+                                            {/* Per-section discount deduction line */}
+                                            {totalDiscountAmount > 0 && (
+                                                <div className="flex items-center justify-between text-sm">
+                                                    <span className="text-violet-600 font-medium flex items-center gap-1.5">
+                                                        <Percent className="w-3 h-3" />
+                                                        Discount
+                                                    </span>
+                                                    <span className="font-mono font-semibold text-violet-600">
+                                                        −₹{totalDiscountAmount.toFixed(2)}
+                                                    </span>
+                                                </div>
+                                            )}
+                                            {/* Grand total discount deduction line */}
+                                            {grandDiscountAmount > 0 && (
+                                                <div className="flex items-center justify-between text-sm">
+                                                    <span className="text-teal-600 font-medium flex items-center gap-1.5">
+                                                        <Percent className="w-3 h-3" />
+                                                        Grand Discount ({grandDiscountInput}%)
+                                                    </span>
+                                                    <span className="font-mono font-semibold text-teal-600">
+                                                        −₹{grandDiscountAmount.toFixed(2)}
+                                                    </span>
+                                                </div>
+                                            )}
                                             <div className="border-t border-emerald-200/60 my-1" />
                                         </div>
                                     )}
 
+                                    {/* Grand Total Discount Input */}
+                                    {currentCalc.enableGrandDiscount && parseFloat(currentCalc.grandDiscountMaxPercent || '0') > 0 && (
+                                        <div className="px-5 py-3 border-t border-emerald-200/40">
+                                            <div className="flex items-center gap-3">
+                                                <span className="text-xs font-semibold text-teal-600 flex items-center gap-1.5">
+                                                    <Percent className="w-3 h-3" />
+                                                    Grand Discount
+                                                </span>
+                                                <div className="relative">
+                                                    <input
+                                                        type="text"
+                                                        inputMode="decimal"
+                                                        value={grandDiscountInput}
+                                                        onChange={(e) => {
+                                                            const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+                                                            setGrandDiscountInput(v);
+                                                        }}
+                                                        placeholder={`${currentCalc.grandDiscountMinPercent || '0'}–${currentCalc.grandDiscountMaxPercent || '0'}`}
+                                                        className="w-20 text-sm font-mono font-semibold text-teal-700 bg-teal-50/50 border border-teal-200 rounded-lg px-2.5 py-1.5 pr-6 outline-none focus:ring-2 focus:ring-teal-200"
+                                                    />
+                                                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-teal-400 font-bold">%</span>
+                                                </div>
+                                                <span className="text-[10px] text-black/30">
+                                                    Range: {currentCalc.grandDiscountMinPercent || '0'}% – {currentCalc.grandDiscountMaxPercent || '0'}%
+                                                </span>
+                                            </div>
+                                        </div>
+                                    )}
+
                                     {/* Grand Total */}
-                                    <div className={`px-5 ${(activeCharges.length > 0 || extraCharges.some((ec) => parseFloat(ec.amount) > 0)) ? 'pt-1 pb-4' : 'py-4'} flex items-center justify-between`}>
+                                    <div className={`px-5 ${(activeCharges.length > 0 || extraCharges.some((ec) => parseFloat(ec.amount) > 0) || totalDiscountAmount > 0 || grandDiscountAmount > 0) ? 'pt-1 pb-4' : 'py-4'} flex items-center justify-between`}>
                                         <div className="flex items-center gap-2">
                                             <span className="text-emerald-500 text-lg">🏆</span>
                                             <span className="text-lg font-bold text-emerald-800">
@@ -700,6 +827,8 @@ function CalcSection({
     inputDefinitions,
     onSetInput,
     onSetDropdown,
+    discountInput,
+    onDiscountChange,
     onToggleCollapse,
     onRemove,
     onFocusInput,
@@ -723,6 +852,8 @@ function CalcSection({
     inputDefinitions: InputDefinition[];
     onSetInput: (key: string, val: string) => void;
     onSetDropdown: (key: string, val: string) => void;
+    discountInput: string;
+    onDiscountChange: (val: string) => void;
     onToggleCollapse?: () => void;
     onRemove?: () => void;
     onFocusInput: (id: string) => void;
@@ -730,13 +861,22 @@ function CalcSection({
 }) {
     const usedInputDefs = inputDefinitions
         .filter((i) => calc.usedInputIds.includes(i.id))
-        .sort((a, b) => a.order - b.order);
+        .sort((a, b) => calc.usedInputIds.indexOf(a.id) - calc.usedInputIds.indexOf(b.id));
 
     const sortedFormulas = [...calc.formulas].sort((a, b) => a.order - b.order);
     const grandTotalFormula = sortedFormulas.find((f) => f.isTotal);
     const regularFormulas = sortedFormulas.filter((f) => !f.isTotal && !f.hidden);
     const profitPct = parseFloat(calc.profitPercent || '0') || 0;
     const gstPct = parseFloat(calc.gstPercent || '0') || 0;
+
+    // ── Discount logic (state is lifted to parent) ──
+    const discountMin = parseFloat(calc.discountMinPercent || '0') || 0;
+    const discountMax = parseFloat(calc.discountMaxPercent || '0') || 0;
+    const discountEnabled = calc.enableDiscount && discountMax > 0;
+    const discountVal = parseFloat(discountInput || '0') || 0;
+    const discountInRange = discountVal >= discountMin && discountVal <= discountMax;
+    const discountValid = discountEnabled && discountInput !== '' && discountInRange;
+    const discountOutOfRange = discountEnabled && discountInput !== '' && !discountInRange;
 
     // Filter hidden inputs from display (but their values still participate in calculations)
     const visibleInputDefs = usedInputDefs.filter((i) => !i.hidden);
@@ -887,7 +1027,7 @@ function CalcSection({
                                     </div>
 
                                     {/* Profit line */}
-                                    {profitPct > 0 && (
+                                    {profitPct > 0 && !calc.hideProfit && (
                                         <div className="px-4 py-1 flex items-center justify-between text-black/40">
                                             <span className="text-xs">
                                                 + Profit ({profitPct}%)
@@ -899,7 +1039,7 @@ function CalcSection({
                                     )}
 
                                     {/* GST line */}
-                                    {gstPct > 0 && (
+                                    {gstPct > 0 && !calc.hideGst && (
                                         <div className="px-4 py-1 flex items-center justify-between text-black/40">
                                             <span className="text-xs">
                                                 + GST ({gstPct}%)
@@ -910,14 +1050,66 @@ function CalcSection({
                                         </div>
                                     )}
 
-                                    {/* Section total (only show when profit or GST is set) */}
-                                    {(profitPct > 0 || gstPct > 0) && (
+                                    {/* Discount input */}
+                                    {discountEnabled && (
+                                        <div className={`px-4 py-2 border-t ${discountOutOfRange ? 'border-red-200 bg-red-50/50' : 'border-black/5'}`}>
+                                            <div className="flex items-center justify-between gap-3">
+                                                <div className="flex items-center gap-2">
+                                                    <Percent className="w-3.5 h-3.5 text-violet-400" />
+                                                    <span className="text-xs font-semibold text-black/50">Discount</span>
+                                                    <span className="text-[9px] text-black/30 font-medium">
+                                                        ({discountMin}% – {discountMax}%)
+                                                    </span>
+                                                </div>
+                                                <div className="relative">
+                                                    <input
+                                                        type="text"
+                                                        inputMode="decimal"
+                                                        value={discountInput}
+                                                        onChange={(e) => {
+                                                            const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./,  '$1');
+                                                            onDiscountChange(v);
+                                                        }}
+                                                        placeholder="0"
+                                                        className={`w-20 text-sm font-mono font-semibold text-right bg-white rounded-lg px-2.5 py-1 pr-6 outline-none border transition-colors ${
+                                                            discountOutOfRange
+                                                                ? 'border-red-300 text-red-600 focus:ring-2 focus:ring-red-200'
+                                                                : 'border-black/10 text-black focus:ring-2 focus:ring-violet-200'
+                                                        }`}
+                                                    />
+                                                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-black/30 font-bold">%</span>
+                                                </div>
+                                            </div>
+                                            {discountOutOfRange && (
+                                                <div className="mt-1.5 flex items-center gap-1.5 text-red-500">
+                                                    <AlertTriangle className="w-3 h-3" />
+                                                    <span className="text-[10px] font-semibold">
+                                                        Discount must be between {discountMin}% and {discountMax}%
+                                                    </span>
+                                                </div>
+                                            )}
+                                            {discountValid && result && (
+                                                <div className="mt-1 flex items-center justify-between text-violet-600">
+                                                    <span className="text-xs font-medium">− Discount ({discountVal}%)</span>
+                                                    <span className="text-xs font-mono font-semibold">
+                                                        −₹{(result.finalAmount * (discountVal / 100)).toFixed(2)}
+                                                    </span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {/* Section total (only show when profit or GST is set or discount applied) */}
+                                    {(profitPct > 0 || gstPct > 0 || discountValid) && (
                                         <div className="px-4 py-2 flex items-center justify-between border-t border-black/5">
                                             <span className="text-sm font-bold text-black/70">
                                                 {label} Total
                                             </span>
                                             <span className="text-sm font-mono font-bold text-black">
-                                                ₹{result.finalAmount.toFixed(2)}
+                                                ₹{(discountValid && result
+                                                    ? result.finalAmount * (1 - discountVal / 100)
+                                                    : (result?.finalAmount || 0)
+                                                ).toFixed(2)}
                                             </span>
                                         </div>
                                     )}

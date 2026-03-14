@@ -14,6 +14,7 @@ import {
     AlertTriangle,
     Copy,
     MoreHorizontal,
+    Percent,
 } from 'lucide-react';
 import { useAppStore } from '../../stores/templateStore';
 import { CategoryTree } from '../../components/admin/CategoryTree';
@@ -521,6 +522,7 @@ function AdditionalChargesSection({ parentCalcId }: { parentCalcId: string }) {
     } = store;
 
     const charges = getChargesForCalculator(parentCalcId);
+    const parentCalc = store.calculators.find((c) => c.id === parentCalcId);
 
     const [expandedChargeId, setExpandedChargeId] = useState<string | null>(null);
     const [editingChargeId, setEditingChargeId] = useState<string | null>(null);
@@ -687,6 +689,72 @@ function AdditionalChargesSection({ parentCalcId }: { parentCalcId: string }) {
                     <span className="text-sm font-medium">Add Other Charges</span>
                 </button>
             )}
+
+            {/* Grand Total Discount Config — after all charges */}
+            {parentCalc && (
+                <div className="mt-4 rounded-2xl border border-teal-200/60 bg-teal-50/20 p-4 space-y-3">
+                    <div className="flex items-center gap-3">
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                            <input
+                                type="checkbox"
+                                checked={parentCalc.enableGrandDiscount || false}
+                                onChange={(e) => updateCalculator(parentCalcId, { enableGrandDiscount: e.target.checked })}
+                                className="w-4 h-4 rounded border-black/20 text-teal-500 focus:ring-teal-300 cursor-pointer"
+                            />
+                            <span className="text-xs font-semibold text-teal-700 flex items-center gap-1.5">
+                                <Percent className="w-3 h-3" />
+                                Allow Grand Total Discount
+                            </span>
+                        </label>
+                        {parentCalc.enableGrandDiscount && (
+                            <span className="text-[9px] font-bold uppercase tracking-wider text-teal-500 bg-teal-50 px-1.5 py-0.5 rounded-md">Active</span>
+                        )}
+                    </div>
+                    {parentCalc.enableGrandDiscount && (
+                        <div className="flex items-center gap-3 flex-wrap">
+                            <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] text-black/40 font-semibold">Min</span>
+                                <div className="relative">
+                                    <input
+                                        type="text"
+                                        inputMode="decimal"
+                                        value={parentCalc.grandDiscountMinPercent || ''}
+                                        onChange={(e) => {
+                                            const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./, '$1');
+                                            updateCalculator(parentCalcId, { grandDiscountMinPercent: v });
+                                        }}
+                                        placeholder="0"
+                                        className="w-16 text-sm font-mono font-semibold text-black bg-white rounded-lg px-2.5 py-1.5 pr-6 outline-none focus:ring-2 focus:ring-teal-200 border border-teal-200/60"
+                                    />
+                                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-black/30 font-bold">%</span>
+                                </div>
+                            </div>
+                            <span className="text-black/20 text-xs font-bold">to</span>
+                            <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] text-black/40 font-semibold">Max</span>
+                                <div className="relative">
+                                    <input
+                                        type="text"
+                                        inputMode="decimal"
+                                        value={parentCalc.grandDiscountMaxPercent || ''}
+                                        onChange={(e) => {
+                                            const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./, '$1');
+                                            updateCalculator(parentCalcId, { grandDiscountMaxPercent: v });
+                                        }}
+                                        placeholder="10"
+                                        className="w-16 text-sm font-mono font-semibold text-black bg-white rounded-lg px-2.5 py-1.5 pr-6 outline-none focus:ring-2 focus:ring-teal-200 border border-teal-200/60"
+                                    />
+                                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-black/30 font-bold">%</span>
+                                </div>
+                            </div>
+                            <span className="text-[10px] text-teal-600/70">
+                                Discount on combined grand total of all charges
+                            </span>
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 }
+
