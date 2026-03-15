@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
     Plus,
     Trash2,
@@ -133,8 +133,43 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
     const [dragReorderIdx, setDragReorderIdx] = useState<number | null>(null);
     const [overReorderIdx, setOverReorderIdx] = useState<number | null>(null);
 
+    // ── Refs for cleanup (auto-discard on unmount / page leave) ──
+    const formulaSnapshotsRef = useRef(formulaSnapshots);
+    const editingFormulaIdsRef = useRef(editingFormulaIds);
+    useEffect(() => { formulaSnapshotsRef.current = formulaSnapshots; }, [formulaSnapshots]);
+    useEffect(() => { editingFormulaIdsRef.current = editingFormulaIds; }, [editingFormulaIds]);
+
+    // Auto-discard all editing formulas when component unmounts (leaving page/switching tabs)
+    useEffect(() => {
+        return () => {
+            const snapshots = formulaSnapshotsRef.current;
+            const editingIds = editingFormulaIdsRef.current;
+            const currentStore = useAppStore.getState();
+            editingIds.forEach((fId) => {
+                const snap = snapshots[fId];
+                if (snap) {
+                    currentStore.setFormulaTokens(calculatorId, fId, snap.tokens);
+                    currentStore.updateFormula(calculatorId, fId, { label: snap.label });
+                }
+            });
+        };
+    }, [calculatorId]);
+
     // Determine if a formula is in editing mode
     const isFormulaEditing = (formulaId: string) => editingFormulaIds.has(formulaId);
+
+    // ── Check if a formula has unsaved changes ──
+    const isFormulaDirty = useCallback((formulaId: string) => {
+        const snap = formulaSnapshots[formulaId];
+        const formula = calc.formulas.find((f) => f.id === formulaId);
+        if (!formula) return false;
+        if (!snap) return formula.tokens.length > 0 || formula.label !== 'New Formula';
+        if (snap.label !== formula.label) return true;
+        if (snap.tokens.length !== formula.tokens.length) return true;
+        return snap.tokens.some((t, i) => t.type !== formula.tokens[i]?.type || t.value !== formula.tokens[i]?.value);
+    }, [formulaSnapshots, calc.formulas]);
+
+
 
     // Save a formula (lock it)
     const handleSaveFormula = (formulaId: string) => {
@@ -184,6 +219,29 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
         });
         setShowDiscardConfirm(null);
     };
+
+    // ── Guarded formula activation: prompt save/discard if switching away from dirty formula ──
+    const handleActivateFormula = useCallback((targetFormulaId: string | null) => {
+        // If clicking the same formula, just toggle
+        if (targetFormulaId === activeFormula) {
+            setActiveFormula(null);
+            return;
+        }
+
+        // Check if we're leaving an editing formula with unsaved changes
+        if (activeFormula && editingFormulaIds.has(activeFormula) && isFormulaDirty(activeFormula)) {
+            const choice = window.confirm(
+                'You have unsaved changes in the current formula. Save them?\n\nOK = Save changes\nCancel = Discard changes'
+            );
+            if (choice) {
+                handleSaveFormula(activeFormula);
+            } else {
+                handleDiscardChanges(activeFormula);
+            }
+        }
+
+        setActiveFormula(targetFormulaId);
+    }, [activeFormula, editingFormulaIds, isFormulaDirty, handleSaveFormula, handleDiscardChanges]);
 
     // Drag an input to the formula canvas
     const handleDragStart = (e: React.DragEvent, inputId: string) => {
@@ -722,7 +780,7 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                                 isDragOver={activeFormula === formula.id && dragOverFormula}
                                 isEditing={isFormulaEditing(formula.id)}
                                 showDiscardConfirm={showDiscardConfirm === formula.id}
-                                onActivate={() => setActiveFormula(activeFormula === formula.id ? null : formula.id)}
+                                onActivate={() => handleActivateFormula(activeFormula === formula.id ? null : formula.id)}
                                 onRemove={() => {
                                     removeFormula(calculatorId, formula.id);
                                     setEditingFormulaIds((prev) => {
