@@ -255,7 +255,11 @@ export const useAppStore = create<AppStore>()(
 
             getInputUsage(id) {
                 return get()
-                    .calculators.filter((c) => c.usedInputIds.includes(id))
+                    .calculators.filter((c) =>
+                        c.formulas.some((f) =>
+                            f.tokens.some((t) => t.type === 'input' && t.value === id)
+                        )
+                    )
                     .map((c) => ({ calcId: c.id, calcName: c.name }));
             },
 
@@ -749,9 +753,14 @@ export const useAppStore = create<AppStore>()(
                     }
                 }
 
+                // Derive actually-used input IDs from formula tokens (not stale usedInputIds)
+                const tokenInputIds = new Set(
+                    calc.formulas.flatMap((f) => f.tokens.filter((t) => t.type === 'input').map((t) => t.value))
+                );
+
                 // Populate from input definitions
                 for (const inputDef of inputDefs) {
-                    if (!calc.usedInputIds.includes(inputDef.id)) continue;
+                    if (!tokenInputIds.has(inputDef.id)) continue;
 
                     if (inputDef.type === 'number') {
                         const val = inputValues[inputDef.key];

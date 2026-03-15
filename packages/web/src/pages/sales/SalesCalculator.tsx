@@ -878,8 +878,12 @@ function CalcSection({
     onFocusInput: (id: string) => void;
     focusedInputId: string | null;
 }) {
+    // Derive actually-used input IDs from formula tokens (not stale usedInputIds)
+    const tokenInputIds = new Set(
+        calc.formulas.flatMap((f) => f.tokens.filter((t) => t.type === 'input').map((t) => t.value))
+    );
     const usedInputDefs = inputDefinitions
-        .filter((i) => calc.usedInputIds.includes(i.id))
+        .filter((i) => tokenInputIds.has(i.id))
         .sort((a, b) => calc.usedInputIds.indexOf(a.id) - calc.usedInputIds.indexOf(b.id));
 
     const sortedFormulas = [...calc.formulas].sort((a, b) => a.order - b.order);
