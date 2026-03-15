@@ -1,432 +1,304 @@
 <p align="center">
-  <img src="packages/web/src/assets/logo.png" alt="Arovave Logo" width="80" height="80" style="border-radius: 20px" />
+  <img src="https://img.shields.io/badge/Arovave-Pricing%20Engine-FF6B35?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJNMTIgMkw0IDdWMTdMOCAyMEgxNkwyMCAxN1Y3TDEyIDJaIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjIiLz48L3N2Zz4=&logoColor=white" alt="Arovave"/>
 </p>
 
-<h1 align="center">Arovave Marketing Calculator</h1>
+<h1 align="center">⚡ Arovave Pricing Engine</h1>
 
 <p align="center">
-  <strong>A powerful, real-time pricing engine with an Excel-like formula builder — built for marketing teams and sales operations.</strong>
-</p>
-
-<p align="center">
-  <a href="https://arovave-marketing-calculator.vercel.app">🌐 Live Demo</a> •
-  <a href="#-features">✨ Features</a> •
-  <a href="#-tech-stack">🛠 Tech Stack</a> •
-  <a href="#-getting-started">🚀 Getting Started</a> •
-  <a href="#-architecture">🏗 Architecture</a>
+  <strong>A powerful, real-time dynamic pricing platform for production companies.</strong><br/>
+  Build complex cost calculators with drag-and-drop formulas, manage inputs centrally, and generate instant client-facing quotations — all from one beautiful admin interface.
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/React-18.3-61DAFB?style=flat-square&logo=react" alt="React" />
-  <img src="https://img.shields.io/badge/TypeScript-5.5-3178C6?style=flat-square&logo=typescript" alt="TypeScript" />
-  <img src="https://img.shields.io/badge/Vite-6.0-646CFF?style=flat-square&logo=vite" alt="Vite" />
-  <img src="https://img.shields.io/badge/Tailwind-3.4-06B6D4?style=flat-square&logo=tailwindcss" alt="Tailwind" />
-  <img src="https://img.shields.io/badge/Zustand-5.0-000?style=flat-square" alt="Zustand" />
-  <img src="https://img.shields.io/badge/Deployed-Vercel-000?style=flat-square&logo=vercel" alt="Vercel" />
+  <img src="https://img.shields.io/badge/React-18.3-61DAFB?style=flat-square&logo=react&logoColor=white" alt="React"/>
+  <img src="https://img.shields.io/badge/Vite-6.0-646CFF?style=flat-square&logo=vite&logoColor=white" alt="Vite"/>
+  <img src="https://img.shields.io/badge/TypeScript-5.5-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript"/>
+  <img src="https://img.shields.io/badge/Fastify-5.0-000000?style=flat-square&logo=fastify&logoColor=white" alt="Fastify"/>
+  <img src="https://img.shields.io/badge/Supabase-Realtime-3ECF8E?style=flat-square&logo=supabase&logoColor=white" alt="Supabase"/>
+  <img src="https://img.shields.io/badge/TailwindCSS-3.4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white" alt="Tailwind"/>
+  <img src="https://img.shields.io/badge/Prisma-6.0-2D3748?style=flat-square&logo=prisma&logoColor=white" alt="Prisma"/>
+  <img src="https://img.shields.io/badge/Docker-Ready-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker"/>
+  <img src="https://img.shields.io/badge/Vercel-Deployed-000000?style=flat-square&logo=vercel&logoColor=white" alt="Vercel"/>
+  <img src="https://img.shields.io/badge/Node-%3E%3D20-339933?style=flat-square&logo=node.js&logoColor=white" alt="Node"/>
 </p>
 
 ---
 
-## 📋 Overview
+## 🎯 What is This?
 
-Arovave Marketing Calculator is a **dynamic pricing engine** that empowers admins to build complex, multi-formula calculators — and lets sales teams use them instantly. Think of it as a **no-code formula builder** where you can create calculators with nested brackets, mixed operators, and chained formulas — all evaluated in real-time using the **shunting-yard algorithm**.
+**Arovave Pricing Engine** is a full-stack platform that lets production companies (film, events, media) define **dynamic calculators** for pricing their services. Instead of manually computing costs in spreadsheets, admins visually build formulas using a drag-and-drop interface, and clients get an instant, interactive pricing page.
 
-> **No backend required for the calculator** — the entire app runs client-side using Zustand for state management. Data persists in the browser's local storage.
+### The Problem It Solves
 
----
+> *"How much will a 3-day shoot with 2 cameras, 5 crew members, and aerial coverage cost?"*
 
-## ✨ Features
+Instead of manually calculating this every time, Arovave lets you:
 
-### 🗂 Hierarchical Category System
-
-- **Unlimited nesting** — create root categories and sub-categories to any depth
-- **Drag & drop reordering** with smooth animations
-- **Breadcrumb navigation** — always know where you are in the tree
-- **One calculator per category** — each leaf category gets its own calculator
-
-### 📊 Excel-Like Calculator Builder
-
-Build calculators using 4 row types — just like designing a spreadsheet:
-
-| Row Type | Description | Example |
-|----------|-------------|---------|
-| **Input** | User enters a number | Length, Width, Quantity |
-| **Dropdown** | User picks from options (each with a rate) | Material Type → Steel ₹50, Wood ₹30 |
-| **Fixed** | Admin-set constant value | Tax Rate = 18% |
-| **Calculated** | Formula that references other rows | Area = Length × Width |
-
-### 🧮 Advanced Formula Builder with Brackets
-
-The crown jewel — build complex mathematical expressions with:
-
-- **Mixed operators** — `+`, `−`, `×`, `÷` in a single formula
-- **Nested brackets** — `( ( A + B ) × C )` with unlimited depth
-- **Operator precedence** — multiplication/division before addition/subtraction
-- **Real-time bracket counter** — shows unclosed brackets as you build
-- **Smart button states** — buttons enable/disable based on formula validity
-- **Shunting-yard algorithm** — industry-standard expression evaluation
-
-```
-Example: (Width + Length) × Rate + (Tax × 2) = accurate result
-```
-
-### 🏷 Grand Total Selector
-
-- Admins can create **multiple formulas** per calculator
-- **Select any formula** as the **Grand Total** — highlighted with a golden badge
-- Toggle between formulas to change what counts as the final price
-
-### 📥 Import from Excel / Google Sheets
-
-- **Upload `.xlsx`, `.xls`, `.csv`** files directly
-- **Paste Google Sheet URL** — auto-fetches and parses (must be publicly shared)
-- **Smart type detection** — auto-detects Input, Dropdown, Fixed, and Calculated fields
-- **Preview before import** — review and adjust types before applying
-
-### 📦 Cost Blocks (Multi-Stage Pricing)
-
-Build complex pricing pipelines with cost blocks:
-
-- **5 block types**: Area-Based, Fixed Rate, Dropdown Rate, Per Piece, Aggregation
-- **Chain formulas** — output of one block feeds into the next
-- **Toggle blocks** on/off, reorder, and mark as optional
-
-### 📝 Temp Item Lists
-
-- Admins define **reference item lists** per calculator (e.g., accessories, add-ons)
-- Sales reps can **add items** from the reference list or create custom ones
-- Items contribute to the **Grand Total** automatically
-
-### 🎨 Premium UI/UX
-
-- **Liquid glass design** — glassmorphism with blur and saturation effects
-- **Smooth animations** — fade-in, slide-up, scale-in transitions
-- **Responsive layout** — works on desktop and tablet
-- **Dark-on-white theme** — high contrast, bold typography (Outfit font)
-- **Lucide icons** — consistent, crisp iconography throughout
+1. **Define inputs once** (e.g., "Number of Days", "Camera Type", "Crew Size")
+2. **Build formulas visually** (drag inputs, add operators, chain calculations)
+3. **Share a link** — clients pick their options and see prices update in real-time
+4. **Generate PDF quotations** — one-click professional quotes
 
 ---
 
-## 🛠 Tech Stack
+## ✨ Key Features
 
-### Frontend (`packages/web`)
+### 🏗️ Admin Panel
+| Feature | Description |
+|---------|-------------|
+| **🎯 Input Hub** | Centralized input management — number fields, dropdowns, fixed values — shared across all calculators |
+| **🧮 Formula Builder** | Drag-and-drop visual formula editor with operator buttons, cursor positioning, and nested formula references |
+| **📂 Category System** | Organize calculators into categories with ordering |
+| **💰 Rate Manager** | Manage local rates and per-calculator overrides |
+| **⚡ Additional Charges** | Attach sub-calculators (charges) to parent calculators with cross-formula referencing |
+| **🎚️ Profit & GST** | Built-in profit percentage and GST with admin hide/show toggles |
+| **📊 Discount Ranges** | Configurable min/max discount sliders per calculator |
+| **👁️ Preview & Reorder** | Preview user-facing order and drag to rearrange inputs/formulas |
+| **💾 Save/Discard** | Draft-based editing with unsaved changes warnings — never lose or accidentally save work |
 
-| Technology | Purpose |
-|-----------|---------|
-| **React 18** | UI framework with hooks |
-| **TypeScript 5.5** | Type-safe development |
-| **Vite 6** | Lightning-fast dev server & build |
-| **Tailwind CSS 3.4** | Utility-first styling |
-| **Zustand 5** | Lightweight state management with persistence |
-| **React Router 7** | Client-side routing |
-| **Decimal.js** | Precise decimal arithmetic (no floating-point errors) |
-| **Lucide React** | Beautiful icon library |
-| **XLSX** | Excel/CSV file parsing |
-| **Zod** | Schema validation |
-| **React Hook Form** | Form management |
+### 🛒 Sales Page (Client-Facing)
+| Feature | Description |
+|---------|-------------|
+| **📱 Responsive Calculator** | Beautiful, mobile-first pricing interface |
+| **⚡ Real-time Computation** | Prices update instantly as users change inputs |
+| **📄 PDF Quotation** | One-click professional quotation generation with `jsPDF` |
+| **🔄 Multi-Calculator** | Support for multiple calculators with additional charges per category |
 
-### Backend (`packages/server`) — Optional
-
-| Technology | Purpose |
-|-----------|---------|
-| **Fastify** | High-performance HTTP server |
-| **Prisma** | Database ORM |
-| **PostgreSQL** | Relational database |
-
-### Engine (`packages/engine`)
-
-| Technology | Purpose |
-|-----------|---------|
-| **TypeScript** | Pure calculation engine |
-| **Decimal.js** | Precise math operations |
+### 🔧 Engine (Core)
+| Feature | Description |
+|---------|-------------|
+| **🔢 Deterministic Math** | Powered by `Decimal.js` — no floating point errors, ever |
+| **📝 Formula Parser** | Tokenized formula parsing with bracket matching and operator precedence |
+| **⚙️ Executor** | Resolves formula chains, dependency graphs, and cross-references |
+| **✅ Validator** | Validates formula integrity, circular references, and missing inputs |
+| **🔄 Conditional Logic** | Supports conditional calculations |
+| **📏 Rounding** | Configurable rounding strategies |
 
 ---
 
-## 🏗 Architecture
+## 🏛️ Architecture
 
 ```
-arovave-marketing-calculator/
-├── packages/
-│   ├── web/                    # 🌐 React SPA (main app)
-│   │   ├── src/
-│   │   │   ├── components/
-│   │   │   │   ├── Layout.tsx            # App shell with glass header
-│   │   │   │   └── admin/
-│   │   │   │       ├── CalculatorBuilder.tsx  # Excel-like row builder + FormulaBar
-│   │   │   │       ├── CategoryTree.tsx       # Hierarchical category manager
-│   │   │   │       ├── CostBlockBuilder.tsx   # Multi-stage pricing blocks
-│   │   │   │       ├── DropdownOptionEditor.tsx  # Option manager for dropdown rows
-│   │   │   │       └── TempListManager.tsx    # Temporary item list editor
-│   │   │   ├── pages/
-│   │   │   │   ├── admin/AdminPanel.tsx   # Admin dashboard + Sheet importer
-│   │   │   │   └── sales/SalesCalculator.tsx  # Sales-facing calculator UI
-│   │   │   ├── stores/
-│   │   │   │   └── templateStore.ts      # Zustand store (all business logic)
-│   │   │   ├── types/
-│   │   │   │   └── calculator.ts         # TypeScript interfaces
-│   │   │   ├── App.tsx                   # Router setup
-│   │   │   └── main.tsx                  # Entry point
-│   │   ├── vercel.json                   # Vercel deployment config
-│   │   └── vite.config.ts                # Build configuration
+arovave-pricing-engine/
+├── 📦 packages/
+│   ├── engine/          ← Pure TypeScript calculation engine
+│   │   ├── calculator.ts    # Core calculator logic
+│   │   ├── parser.ts        # Formula tokenizer & parser
+│   │   ├── executor.ts      # Formula chain executor
+│   │   ├── resolver.ts      # Dependency resolver
+│   │   ├── validator.ts     # Formula integrity validator
+│   │   ├── conditional.ts   # Conditional logic handler
+│   │   ├── rounding.ts      # Rounding strategies
+│   │   └── types.ts         # Shared type definitions
 │   │
-│   ├── engine/                 # ⚙️ Calculation engine (pure TS)
-│   │   └── src/
-│   │       ├── calculator.ts             # Main calculation orchestrator
-│   │       ├── executor.ts               # Expression executor
-│   │       ├── parser.ts                 # Formula parser
-│   │       ├── resolver.ts               # Variable resolver
-│   │       ├── validator.ts              # Input validation
-│   │       ├── conditional.ts            # Conditional logic
-│   │       ├── rounding.ts               # Number rounding utilities
-│   │       └── types.ts                  # Engine type definitions
+│   ├── server/          ← Fastify REST API
+│   │   ├── src/app.ts       # Server entry point
+│   │   └── prisma/          # Database schema & migrations
 │   │
-│   └── server/                 # 🖥 Fastify API server (optional)
-│       └── src/
-│           ├── app.ts                    # Server setup with CORS & routes
-│           ├── routes/
-│           │   └── quotes.ts             # Immutable quote creation
-│           └── lib/
-│               └── prisma.ts             # Database client
+│   └── web/             ← React SPA (Admin + Sales)
+│       ├── components/
+│       │   ├── admin/
+│       │   │   ├── AdminPanel.tsx              # Main admin dashboard
+│       │   │   ├── InputHub.tsx                # Centralized input management
+│       │   │   ├── DragDropCalculatorBuilder.tsx # Visual formula editor
+│       │   │   ├── CategoryTree.tsx            # Category management
+│       │   │   └── RateManager.tsx             # Rate configuration
+│       │   ├── QuotationModal.tsx              # PDF quote generator
+│       │   └── Layout.tsx                      # App shell
+│       ├── pages/
+│       │   ├── admin/AdminPanel.tsx            # Admin route
+│       │   └── sales/SalesCalculator.tsx       # Client calculator
+│       └── stores/
+│           ├── templateStore.ts                # Zustand state management
+│           └── supabaseSync.ts                 # Real-time Supabase sync
 │
-├── docker-compose.yml          # 🐳 Full-stack local development
-├── Dockerfile.server           # Server container
-├── Dockerfile.web              # Web container
-├── tsconfig.base.json          # Shared TypeScript config
-└── package.json                # Monorepo workspace config
+├── 🐳 docker-compose.yml    # Full stack orchestration
+├── 🔧 Dockerfile.server     # Server container
+├── 🔧 Dockerfile.web        # Frontend container
+└── 🚀 vercel.json           # Vercel deployment config
 ```
 
 ### Data Flow
 
-```
-┌─────────────────────────────────────────────────────┐
-│                    ADMIN PANEL                       │
-│                                                     │
-│  Category Tree ──→ Calculator Builder ──→ Formulas  │
-│       │                   │                  │      │
-│       │            ┌──────┴──────┐     ┌─────┴────┐ │
-│       │            │ Row Types:  │     │ Brackets  │ │
-│       │            │ • Input     │     │ Operators │ │
-│       │            │ • Dropdown  │     │ Shunting  │ │
-│       │            │ • Fixed     │     │ Yard Algo │ │
-│       │            │ • Calculated│     └─────┬────┘ │
-│       │            └──────┬──────┘           │      │
-│       │                   │                  │      │
-│       ▼                   ▼                  ▼      │
-│  ┌─────────────────────────────────────────────┐    │
-│  │          Zustand Store (templateStore)       │    │
-│  │     State + Business Logic + Persistence     │    │
-│  └─────────────────────┬───────────────────────┘    │
-└────────────────────────│────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────┐
-│                 SALES CALCULATOR                     │
-│                                                     │
-│  Browse Categories ──→ Fill Inputs ──→ See Results  │
-│                                           │         │
-│                              ┌────────────┴───────┐ │
-│                              │ Real-Time Calc:    │ │
-│                              │ • Formula eval     │ │
-│                              │ • Decimal.js math  │ │
-│                              │ • Grand Total      │ │
-│                              │ • Temp items sum   │ │
-│                              └────────────────────┘ │
-└─────────────────────────────────────────────────────┘
+```mermaid
+graph LR
+    A[Admin Panel] -->|Define Inputs & Formulas| B[Zustand Store]
+    B -->|Real-time Sync| C[Supabase]
+    C -->|Load on Visit| D[Sales Page]
+    D -->|User Selects Options| E[Engine]
+    E -->|Deterministic Calc| F[Live Price Display]
+    F -->|Generate| G[PDF Quotation]
 ```
 
 ---
 
-## 🚀 Getting Started
+## 🚀 Quick Start
 
 ### Prerequisites
 
 - **Node.js** ≥ 20.0.0
 - **npm** ≥ 9.0.0
+- **Git**
 
-### Quick Start (Frontend Only)
+### 1. Clone & Install
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/Atx-3/arovave.in-calculator-real.git
-cd arovave.in-calculator-real
-
-# 2. Install dependencies
+git clone https://github.com/your-org/arovave-pricing-engine.git
+cd arovave-pricing-engine
 npm install
-
-# 3. Start the development server
-npm run dev:web
-
-# 4. Open in browser
-# → http://localhost:5173
 ```
 
-### Full Stack (with Docker)
+### 2. Configure Environment
 
 ```bash
-# 1. Clone and configure
-git clone https://github.com/Atx-3/arovave.in-calculator-real.git
-cd arovave.in-calculator-real
 cp .env.example .env
-
-# 2. Start all services
-docker-compose up -d
-
-# Services:
-# → Frontend:  http://localhost:5173
-# → Backend:   http://localhost:3001
-# → Database:  postgresql://localhost:54322
 ```
 
-### Available Scripts
+Edit `.env` with your **Supabase** credentials:
 
-| Command | Description |
-|---------|-------------|
-| `npm run dev:web` | Start frontend dev server |
-| `npm run dev:server` | Start backend API server |
-| `npm run dev` | Start both frontend + backend |
-| `npm run build` | Build all packages for production |
-| `npm run lint` | Run ESLint across all packages |
-| `npm run format` | Format code with Prettier |
-| `npm run test:engine` | Run calculation engine tests |
+```env
+# Supabase Configuration
+SUPABASE_URL="https://your-project.supabase.co"
+SUPABASE_ANON_KEY="your-anon-key"
+SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
+DATABASE_URL="postgresql://..."
 
----
+# Frontend (Vite)
+VITE_SUPABASE_URL="https://your-project.supabase.co"
+VITE_SUPABASE_ANON_KEY="your-anon-key"
+VITE_API_URL="http://localhost:3001"
+```
 
-## 🌐 Deployment
-
-### Vercel (Recommended)
-
-The app is deployed as a **static SPA** on Vercel.
-
-1. Connect your GitHub repository to Vercel
-2. Set **Root Directory** to `packages/web`
-3. Vercel auto-detects Vite and builds with `vite build`
-4. SPA rewrites are configured in `packages/web/vercel.json`
-
-**Live URL**: [arovave-marketing-calculator.vercel.app](https://arovave-marketing-calculator.vercel.app)
-
-### Docker
+### 3. Run Development Server
 
 ```bash
-# Build and run with Docker Compose
-docker-compose up --build -d
+# Frontend only (most common)
+npm run dev
+
+# Backend + Frontend
+npm run dev:all
+
+# Individual packages
+npm run dev:web      # React app on :5173
+npm run dev:server   # Fastify API on :3001
 ```
+
+### 4. Open in Browser
+
+| Page | URL | Description |
+|------|-----|-------------|
+| **Admin Panel** | `http://localhost:5173/admin` | Build calculators, manage inputs |
+| **Sales Page** | `http://localhost:5173/` | Client-facing calculator |
 
 ---
 
-## 🧮 How the Formula Engine Works
+## 🐳 Docker Deployment
 
-The formula builder uses the **shunting-yard algorithm** to correctly evaluate mathematical expressions with:
+Spin up the entire stack with one command:
 
-1. **Tokenization** — User builds formula by clicking field/operator/bracket buttons
-2. **Infix to Postfix** — Shunting-yard converts `A + B × C` to `A B C × +`
-3. **Evaluation** — Postfix expression is evaluated left-to-right with a value stack
-4. **Decimal.js** — All math uses arbitrary-precision decimals (no `0.1 + 0.2 = 0.30000000000000004`)
-
-### Operator Precedence
-
-| Priority | Operators | Description |
-|----------|-----------|-------------|
-| **High** | `×` `÷` | Multiplication, Division |
-| **Low** | `+` `−` | Addition, Subtraction |
-| **Override** | `( )` | Brackets override precedence |
-
-### Example
-
+```bash
+docker compose up -d
 ```
-Formula: ( Width + Length ) × Rate
 
-Tokens: [ (, Width, +, Length, ), ×, Rate ]
-         ↓ Shunting-yard algorithm
-Postfix: [ Width, Length, +, Rate, × ]
-         ↓ Evaluate with values: Width=5, Length=10, Rate=100
-Result:  (5 + 10) × 100 = 1500
-```
+This starts:
+- **PostgreSQL 15** on port `54322`
+- **Fastify Server** on port `3001`
+- **Vite Dev Server** on port `5173`
 
 ---
 
-## 🗂 Data Model
+## ☁️ Vercel Deployment
 
-```typescript
-// Category — supports unlimited nesting
-interface Category {
-  id: string;
-  name: string;
-  parentId: string | null;
-  order: number;
-}
+The frontend deploys directly to **Vercel**:
 
-// Calculator — one per category
-interface Calculator {
-  id: string;
-  name: string;
-  categoryId: string;
-  rows: CalculatorRow[];         // Excel-like rows
-  costBlocks: CostBlock[];       // Multi-stage pricing
-  tempItems: TempItem[];         // Reference items
-}
-
-// Row Types: 'input' | 'dropdown' | 'fixed' | 'calculated'
-interface CalculatorRow {
-  id: string;
-  label: string;
-  key: string;
-  type: RowType;
-  fixedValue?: string;           // For 'fixed' type
-  dropdownOptions?: DropdownOption[];  // For 'dropdown' type
-  formula?: RowFormula;          // For 'calculated' type
-  isTotal?: boolean;             // Grand total flag
-}
-
-// Formula with bracket support
-interface RowFormula {
-  tokens: FormulaToken[];        // Full infix expression
-  operands: string[];            // Legacy fallback
-  operation: Operation;          // Legacy fallback
-}
-
-type FormulaToken = {
-  type: 'field' | 'operator' | 'number' | 'bracket';
-  value: string;
-};
+```bash
+npm run build
+vercel --prod
 ```
 
----
-
-## 📸 Screenshots
-
-### Sales Calculator — User-Facing
->
-> Clean, intuitive interface for sales reps. Browse categories, fill inputs, see real-time pricing.
-
-### Admin Panel — Category Manager
->
-> Build hierarchical product categories with drag & drop reordering.
-
-### Admin Panel — Calculator Builder
->
-> Excel-like row editor with input, dropdown, fixed, and calculated row types.
-
-### Admin Panel — Formula Builder with Brackets
->
-> Advanced formula builder with nested brackets, mixed operators, and real-time validation.
+The `vercel.json` configuration handles routing automatically.
 
 ---
 
-## 🔒 Security
+## 🧪 Testing
 
-- **No sensitive data** transmitted — all calculations run client-side
-- **State persistence** via `localStorage` — no external database required for the calculator
-- **Server package** (optional) uses Prisma with parameterized queries to prevent SQL injection
-- **CORS** configured for development proxy
+```bash
+# Run all tests
+npm test
+
+# Engine tests only
+npm run test:engine
+
+# Server tests only
+npm run test:server
+```
+
+The engine uses **Vitest** with deterministic math assertions powered by `Decimal.js`.
+
+---
+
+## 🛠️ Tech Stack
+
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| **Frontend** | React 18 + Vite 6 | Blazing fast UI with HMR |
+| **Styling** | TailwindCSS 3.4 | Utility-first responsive design |
+| **State** | Zustand 5 | Lightweight reactive state management |
+| **Forms** | React Hook Form + Zod | Type-safe form validation |
+| **Icons** | Lucide React | Beautiful, consistent iconography |
+| **PDF** | jsPDF | Client-side quotation generation |
+| **Data** | xlsx | Excel import/export support |
+| **Routing** | React Router 7 | Client-side navigation |
+| **Backend** | Fastify 5 | High-performance REST API |
+| **ORM** | Prisma 6 | Type-safe database access |
+| **Database** | Supabase (PostgreSQL) | Hosted Postgres with real-time sync |
+| **Math** | Decimal.js | Arbitrary-precision floating-point arithmetic |
+| **Testing** | Vitest 2 | Fast unit & integration tests |
+| **Language** | TypeScript 5.5 | End-to-end type safety |
+| **Deploy** | Vercel + Docker | Flexible deployment options |
+
+---
+
+## 📁 NPM Scripts Reference
+
+| Script | Description |
+|--------|-------------|
+| `npm run dev` | Start frontend dev server |
+| `npm run dev:all` | Start both frontend & backend |
+| `npm run dev:server` | Start backend only |
+| `npm run dev:web` | Start frontend only |
+| `npm run build` | Build all packages for production |
+| `npm run test` | Run all test suites |
+| `npm run test:engine` | Run engine tests |
+| `npm run test:server` | Run server tests |
+| `npm run lint` | Lint all TypeScript files |
+| `npm run format` | Format code with Prettier |
+
+---
+
+## 🔐 Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DATABASE_URL` | ✅ | PostgreSQL connection string |
+| `SUPABASE_URL` | ✅ | Supabase project URL |
+| `SUPABASE_ANON_KEY` | ✅ | Supabase anonymous key |
+| `SUPABASE_SERVICE_ROLE_KEY` | ⚠️ Server only | Supabase admin key |
+| `VITE_SUPABASE_URL` | ✅ | Frontend Supabase URL |
+| `VITE_SUPABASE_ANON_KEY` | ✅ | Frontend Supabase key |
+| `VITE_API_URL` | ✅ | Backend API endpoint |
+| `PORT` | Optional | Server port (default: `3001`) |
+| `HOST` | Optional | Server host (default: `0.0.0.0`) |
+| `NODE_ENV` | Optional | Environment (`development`/`production`) |
 
 ---
 
 ## 📄 License
 
-This project is private and proprietary to **Arovave**.
+This project is **private** and proprietary to [Arovave](https://arovave.in).
 
 ---
 
 <p align="center">
-  Built with ❤️ by the <strong>Arovave</strong> team
+  <sub>Built with ❤️ by the Arovave team</sub>
 </p>
