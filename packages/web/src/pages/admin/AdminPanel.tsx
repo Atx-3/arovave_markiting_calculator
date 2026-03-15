@@ -97,7 +97,7 @@ export function AdminPanel() {
 
     // Stats
     const totalInputs = store.inputDefinitions.length;
-    const totalCalcs = calculators.length;
+    const totalCalcs = calculators.filter((c) => !c.isCharge).length;
 
     const tabs: { key: Tab; label: string; icon: typeof FolderTree; badge?: number }[] = [
         { key: 'inputs', label: 'Input Hub', icon: Layers, badge: totalInputs },

@@ -98,11 +98,18 @@ async function loadFromSupabase() {
         console.log(`📦 Loaded from Supabase: ${remoteCats.length} categories, ${remoteInputs.length} inputs, ${remoteCalcs.length} calculators`);
         isSyncingFromRemote = true;
 
+        // Clean up orphaned charges (charges whose parent calculator was deleted)
+        const mainCalcIds = new Set(remoteCalcs.filter((c: any) => !c.isCharge).map((c: any) => c.id));
+        const cleanedCalcs = remoteCalcs.filter((c: any) => !c.isCharge || (c.parentCalcId && mainCalcIds.has(c.parentCalcId)));
+        if (cleanedCalcs.length !== remoteCalcs.length) {
+            console.log(`🧹 Cleaned up ${remoteCalcs.length - cleanedCalcs.length} orphaned charge(s)`);
+        }
+
         storeRef.setState({
             categories: remoteCats,
             inputDefinitions: remoteInputs,
             inputGroups: remoteGroups,
-            calculators: remoteCalcs,
+            calculators: cleanedCalcs,
         });
 
         setTimeout(() => { isSyncingFromRemote = false; }, 1000);

@@ -254,8 +254,13 @@ export const useAppStore = create<AppStore>()(
             },
 
             getInputUsage(id) {
-                return get()
-                    .calculators.filter((c) =>
+                const calcs = get().calculators;
+                // Only count non-orphaned calculators (exclude charges whose parent is deleted)
+                const mainIds = new Set(calcs.filter((c) => !c.isCharge).map((c) => c.id));
+                return calcs
+                    .filter((c) =>
+                        // Exclude orphaned charges
+                        (!c.isCharge || (c.parentCalcId && mainIds.has(c.parentCalcId))) &&
                         c.formulas.some((f) =>
                             f.tokens.some((t) => t.type === 'input' && t.value === id)
                         )
@@ -426,7 +431,8 @@ export const useAppStore = create<AppStore>()(
             },
 
             deleteCalculator(id) {
-                set({ calculators: get().calculators.filter((c) => c.id !== id) });
+                // Cascade: also remove any charges linked to this calculator
+                set({ calculators: get().calculators.filter((c) => c.id !== id && c.parentCalcId !== id) });
             },
 
             updateCalculator(id, updates) {
