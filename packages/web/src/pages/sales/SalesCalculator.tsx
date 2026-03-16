@@ -112,12 +112,24 @@ export function SalesCalculator() {
         const profitPct = parseFloat(currentCalc.profitPercent || '0') || 0;
         const profitAmount = subtotal * (profitPct / 100);
         const afterProfit = subtotal + profitAmount;
-        const gstPct = parseFloat(currentCalc.gstPercent || '0') || 0;
-        const gstAmount = afterProfit * (gstPct / 100);
-        const finalAmount = afterProfit + gstAmount;
 
-        return { ...result, subtotal, profitAmount, afterProfit, gstAmount, finalAmount };
-    }, [currentCalc, mainInputs, mainDropdowns, calculateResult]);
+        // Apply per-section discount on afterProfit (excluding GST)
+        const discInput = discountInputs[currentCalc.id] || '';
+        const dMax = parseFloat(currentCalc.discountMaxPercent || '0') || 0;
+        const dMin = parseFloat(currentCalc.discountMinPercent || '0') || 0;
+        const dEnabled = currentCalc.enableDiscount && dMax > 0;
+        const dVal = parseFloat(discInput || '0') || 0;
+        const dValid = dEnabled && discInput !== '' && dVal >= dMin && dVal <= dMax;
+        const discountAmount = dValid ? afterProfit * (dVal / 100) : 0;
+        const afterDiscount = afterProfit - discountAmount;
+
+        // GST on discounted amount (after discount, not before)
+        const gstPct = parseFloat(currentCalc.gstPercent || '0') || 0;
+        const gstAmount = afterDiscount * (gstPct / 100);
+        const finalAmount = afterDiscount + gstAmount;
+
+        return { ...result, subtotal, profitAmount, afterProfit, discountAmount, afterDiscount, gstAmount, finalAmount };
+    }, [currentCalc, mainInputs, mainDropdowns, calculateResult, discountInputs]);
 
     // Active charges (only compute results for activated ones)
     const activeCharges = charges.filter((c) => activeChargeIds.includes(c.id));
@@ -125,7 +137,7 @@ export function SalesCalculator() {
 
     // Per-charge results
     const chargeResults = useMemo(() => {
-        const results: Record<string, { formulaResults: Record<string, string>; total: string; subtotal: number; profitAmount: number; afterProfit: number; gstAmount: number; finalAmount: number }> = {};
+        const results: Record<string, { formulaResults: Record<string, string>; total: string; subtotal: number; profitAmount: number; afterProfit: number; discountAmount: number; afterDiscount: number; gstAmount: number; finalAmount: number }> = {};
 
         // Build external formula values from main calculator (keyed by formula ID)
         const externalValues: Record<string, string> = {};
@@ -149,11 +161,22 @@ export function SalesCalculator() {
             const profitPct = parseFloat(charge.profitPercent || '0') || 0;
             const profitAmount = subtotal * (profitPct / 100);
             const afterProfit = subtotal + profitAmount;
-            const gstPct = parseFloat(charge.gstPercent || '0') || 0;
-            const gstAmount = afterProfit * (gstPct / 100);
-            const finalAmount = afterProfit + gstAmount;
 
-            results[charge.id] = { ...result, subtotal, profitAmount, afterProfit, gstAmount, finalAmount };
+            // Apply per-section discount on afterProfit (excluding GST)
+            const discInput = discountInputs[charge.id] || '';
+            const dMax = parseFloat(charge.discountMaxPercent || '0') || 0;
+            const dMin = parseFloat(charge.discountMinPercent || '0') || 0;
+            const dEnabled = charge.enableDiscount && dMax > 0;
+            const dVal = parseFloat(discInput || '0') || 0;
+            const dValid = dEnabled && discInput !== '' && dVal >= dMin && dVal <= dMax;
+            const discountAmount = dValid ? afterProfit * (dVal / 100) : 0;
+            const afterDiscount = afterProfit - discountAmount;
+
+            const gstPct = parseFloat(charge.gstPercent || '0') || 0;
+            const gstAmount = afterDiscount * (gstPct / 100);
+            const finalAmount = afterDiscount + gstAmount;
+
+            results[charge.id] = { ...result, subtotal, profitAmount, afterProfit, discountAmount, afterDiscount, gstAmount, finalAmount };
 
             // Add this charge's formula results to externalValues for subsequent charges
             for (const f of charge.formulas) {
@@ -161,30 +184,26 @@ export function SalesCalculator() {
             }
         }
         return results;
-    }, [activeCharges, chargeInputs, chargeDropdowns, calculateResult, currentCalc, mainResult]);
+    }, [activeCharges, chargeInputs, chargeDropdowns, calculateResult, currentCalc, mainResult, discountInputs]);
 
     // Extra charges total
     const extraChargesTotal = useMemo(() => {
         return extraCharges.reduce((sum, ec) => sum + (parseFloat(ec.amount) || 0), 0);
     }, [extraCharges]);
 
-    // Helper: apply discount to a finalAmount for a given calc id
-    const getDiscountedAmount = useCallback((calcId: string, finalAmount: number, calc: CalcType) => {
-        const discountInput = discountInputs[calcId] || '';
-        const discountMax = parseFloat(calc.discountMaxPercent || '0') || 0;
-        const discountMin = parseFloat(calc.discountMinPercent || '0') || 0;
-        const discountEnabled = calc.enableDiscount && discountMax > 0;
-        const discountVal = parseFloat(discountInput || '0') || 0;
-        const discountInRange = discountVal >= discountMin && discountVal <= discountMax;
-        const discountValid = discountEnabled && discountInput !== '' && discountInRange;
-        if (discountValid) {
-            return finalAmount * (1 - discountVal / 100);
+    // Total per-section discount amount (for display — already applied in section finals)
+    const totalDiscountAmount = useMemo(() => {
+        let discount = 0;
+        if (mainResult) discount += mainResult.discountAmount;
+        for (const charge of activeCharges) {
+            const r = chargeResults[charge.id];
+            if (r) discount += r.discountAmount;
         }
-        return finalAmount;
-    }, [discountInputs]);
+        return discount;
+    }, [mainResult, activeCharges, chargeResults]);
 
-    // Pre-discount grand total (sum of all finalAmounts without discount)
-    const preDiscountGrandTotal = useMemo(() => {
+    // Sum of all finalAmounts (per-section discounts already applied before GST)
+    const afterSectionDiscounts = useMemo(() => {
         let total = mainResult?.finalAmount || 0;
         for (const r of Object.values(chargeResults)) {
             total += r.finalAmount;
@@ -193,25 +212,7 @@ export function SalesCalculator() {
         return total;
     }, [mainResult, chargeResults, extraChargesTotal]);
 
-    // Total discount amount across all sections
-    const totalDiscountAmount = useMemo(() => {
-        let discount = 0;
-        if (mainResult && currentCalc) {
-            discount += mainResult.finalAmount - getDiscountedAmount(currentCalc.id, mainResult.finalAmount, currentCalc);
-        }
-        for (const charge of activeCharges) {
-            const r = chargeResults[charge.id];
-            if (r) {
-                discount += r.finalAmount - getDiscountedAmount(charge.id, r.finalAmount, charge);
-            }
-        }
-        return discount;
-    }, [mainResult, currentCalc, activeCharges, chargeResults, getDiscountedAmount]);
-
-    // After per-section discounts
-    const afterSectionDiscounts = preDiscountGrandTotal - totalDiscountAmount;
-
-    // Grand total discount (applied on top of everything)
+    // Grand total discount (applied on sum — mathematically equivalent to pre-GST)
     const grandDiscountAmount = useMemo(() => {
         if (!currentCalc?.enableGrandDiscount) return 0;
         const max = parseFloat(currentCalc.grandDiscountMaxPercent || '0') || 0;
@@ -497,12 +498,12 @@ export function SalesCalculator() {
                                                     </span>
                                                 </div>
                                             ))}
-                                            {/* Per-section discount deduction line */}
+                                            {/* Per-section discount info (already reflected in section totals above) */}
                                             {totalDiscountAmount > 0 && (
                                                 <div className="flex items-center justify-between text-sm">
                                                     <span className="text-violet-600 font-medium flex items-center gap-1.5">
                                                         <Percent className="w-3 h-3" />
-                                                        Discount
+                                                        Discount (included above)
                                                     </span>
                                                     <span className="font-mono font-semibold text-violet-600">
                                                         −₹{totalDiscountAmount.toFixed(2)}
@@ -783,7 +784,7 @@ export function SalesCalculator() {
                     // Main calculator
                     items.push({
                         label: currentCalc.name,
-                        amount: mainResult.afterProfit,       // profit merged
+                        amount: mainResult.afterDiscount,     // profit merged, discount applied
                         gstPercent: parseFloat(currentCalc.gstPercent || '0') || 0,
                         gstAmount: mainResult.gstAmount,
                         finalAmount: mainResult.finalAmount,
@@ -795,7 +796,7 @@ export function SalesCalculator() {
                         if (r) {
                             items.push({
                                 label: charge.name,
-                                amount: r.afterProfit,            // profit merged
+                                amount: r.afterDiscount,          // profit merged, discount applied
                                 gstPercent: parseFloat(charge.gstPercent || '0') || 0,
                                 gstAmount: r.gstAmount,
                                 finalAmount: r.finalAmount,
@@ -865,6 +866,8 @@ function CalcSection({
         subtotal: number;
         profitAmount: number;
         afterProfit: number;
+        discountAmount: number;
+        afterDiscount: number;
         gstAmount: number;
         finalAmount: number;
     } | null;
@@ -1036,7 +1039,7 @@ function CalcSection({
                                 </div>
                             )}
 
-                            {/* Subtotal + Profit + GST breakdown */}
+                            {/* Subtotal + Profit + Discount + GST breakdown */}
                             {grandTotalFormula && (
                                 <div className="border-t border-black/8 bg-gradient-to-r from-black/[0.02] to-transparent">
                                     {/* Subtotal */}
@@ -1061,19 +1064,7 @@ function CalcSection({
                                         </div>
                                     )}
 
-                                    {/* GST line */}
-                                    {gstPct > 0 && !calc.hideGst && (
-                                        <div className="px-4 py-1 flex items-center justify-between text-black/40">
-                                            <span className="text-xs">
-                                                + GST ({gstPct}%)
-                                            </span>
-                                            <span className="text-xs font-mono font-medium">
-                                                ₹{result.gstAmount.toFixed(2)}
-                                            </span>
-                                        </div>
-                                    )}
-
-                                    {/* Discount input */}
+                                    {/* Discount input — now BEFORE GST */}
                                     {discountEnabled && (
                                         <div className={`px-4 py-2 border-t ${discountOutOfRange ? 'border-red-200 bg-red-50/50' : 'border-black/5'}`}>
                                             <div className="flex items-center justify-between gap-3">
@@ -1115,10 +1106,22 @@ function CalcSection({
                                                 <div className="mt-1 flex items-center justify-between text-violet-600">
                                                     <span className="text-xs font-medium">− Discount ({discountVal}%)</span>
                                                     <span className="text-xs font-mono font-semibold">
-                                                        −₹{(result.finalAmount * (discountVal / 100)).toFixed(2)}
+                                                        −₹{result.discountAmount.toFixed(2)}
                                                     </span>
                                                 </div>
                                             )}
+                                        </div>
+                                    )}
+
+                                    {/* GST line — now computed on discounted amount */}
+                                    {gstPct > 0 && !calc.hideGst && (
+                                        <div className="px-4 py-1 flex items-center justify-between text-black/40">
+                                            <span className="text-xs">
+                                                + GST ({gstPct}%)
+                                            </span>
+                                            <span className="text-xs font-mono font-medium">
+                                                ₹{result.gstAmount.toFixed(2)}
+                                            </span>
                                         </div>
                                     )}
 
@@ -1129,10 +1132,7 @@ function CalcSection({
                                                 {label} Total
                                             </span>
                                             <span className="text-sm font-mono font-bold text-black">
-                                                ₹{(discountValid && result
-                                                    ? result.finalAmount * (1 - discountVal / 100)
-                                                    : (result?.finalAmount || 0)
-                                                ).toFixed(2)}
+                                                ₹{(result?.finalAmount || 0).toFixed(2)}
                                             </span>
                                         </div>
                                     )}
