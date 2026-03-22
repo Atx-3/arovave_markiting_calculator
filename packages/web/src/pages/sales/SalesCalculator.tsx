@@ -27,6 +27,7 @@ export function SalesCalculator() {
     const {
         categories,
         inputDefinitions,
+        syncReady,
         getCategoryChildren,
         getCategoryBreadcrumb,
         getCalculatorForCategory,
@@ -227,6 +228,18 @@ export function SalesCalculator() {
 
     // Grand total = after section discounts - grand discount
     const grandTotal = afterSectionDiscounts - grandDiscountAmount;
+
+    // ── Loading guard (AFTER all hooks to comply with React rules) ──
+    if (!syncReady) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100/80">
+                <div className="text-center space-y-4">
+                    <div className="w-10 h-10 border-3 border-black/10 border-t-black/60 rounded-full animate-spin mx-auto" />
+                    <p className="text-sm text-black/40 font-medium">Loading calculator data...</p>
+                </div>
+            </div>
+        );
+    }
 
     // Reference sidebar
     const focusedInputDef = focusedInputId

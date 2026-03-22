@@ -6,7 +6,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import Decimal from 'decimal.js';
-import { initSupabaseSync } from './supabaseSync';
+import { initSupabaseSync, forceSave as forceSaveToSupabase } from './supabaseSync';
 import type {
     Category,
     InputDefinition,
@@ -35,6 +35,10 @@ const labelToKey = (label: string): string =>
 // ─── Store Interface ─────────────────────────────────────────────────
 
 interface AppStore {
+    // ── Sync State ──
+    syncReady: boolean;
+    forceSave: () => Promise<void>;
+
     // ── Categories ──
     categories: Category[];
     addCategory: (name: string, parentId: string | null) => void;
@@ -117,6 +121,16 @@ interface AppStore {
 export const useAppStore = create<AppStore>()(
     persist(
         (set, get) => ({
+            // ══════════════════════════════════════════════════════════════════
+            // SYNC STATE
+            // ══════════════════════════════════════════════════════════════════
+
+            syncReady: false,
+
+            async forceSave() {
+                await forceSaveToSupabase();
+            },
+
             // ══════════════════════════════════════════════════════════════════
             // CATEGORIES
             // ══════════════════════════════════════════════════════════════════
@@ -770,7 +784,21 @@ export const useAppStore = create<AppStore>()(
 
                     if (inputDef.type === 'number') {
                         const val = inputValues[inputDef.key];
-                        valueMap[inputDef.id] = val ? new Decimal(val || '0') : new Decimal(0);
+                        if (val !== undefined && val !== '') {
+                            // User entered a value — use it directly
+                            try {
+                                valueMap[inputDef.id] = new Decimal(val);
+                            } catch {
+                                valueMap[inputDef.id] = new Decimal(0);
+                            }
+                        } else {
+                            // User hasn't entered anything — fall back to admin-defined rate
+                            try {
+                                valueMap[inputDef.id] = new Decimal(inputDef.rate || '0');
+                            } catch {
+                                valueMap[inputDef.id] = new Decimal(0);
+                            }
+                        }
                     } else if (inputDef.type === 'dropdown') {
                         const selected = selectedDropdowns[inputDef.key];
                         if (selected && inputDef.dropdownOptions) {
@@ -830,6 +858,13 @@ export const useAppStore = create<AppStore>()(
         }),
         {
             name: 'arovave-calculator-v2',
+            // Only persist data fields, not sync state
+            partialize: (state: any) => ({
+                categories: state.categories,
+                inputDefinitions: state.inputDefinitions,
+                inputGroups: state.inputGroups,
+                calculators: state.calculators,
+            }),
         },
     ),
 );

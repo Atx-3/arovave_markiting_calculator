@@ -47,6 +47,7 @@ export function AdminPanel() {
     } = store;
 
     const selectedCategory = categories.find((c) => c.id === selectedCategoryId);
+    const isRootCategory = selectedCategory ? selectedCategory.parentId === null : false;
     const categoryCalcs = selectedCategoryId ? getCalculatorsForCategory(selectedCategoryId) : [];
     const selectedCalc = selectedCalcId ? calculators.find((c) => c.id === selectedCalcId) : undefined;
     const copiedCalc = copiedCalcId ? calculators.find((c) => c.id === copiedCalcId) : undefined;
@@ -63,7 +64,7 @@ export function AdminPanel() {
     };
 
     const handleCreateCalculator = () => {
-        if (!selectedCategoryId || !selectedCategory) return;
+        if (!selectedCategoryId || !selectedCategory || isRootCategory) return;
         const calcNum = categoryCalcs.length + 1;
         const name = calcNum === 1 ? selectedCategory.name : `${selectedCategory.name} ${calcNum}`;
         const newId = createCalculator(selectedCategoryId, name);
@@ -444,19 +445,33 @@ export function AdminPanel() {
                                 ) : categoryCalcs.length === 0 ? (
                                     <div className="text-center py-12">
                                         <Calculator className="w-12 h-12 text-black/20 mx-auto mb-4" />
-                                        <p className="text-black/40 text-base font-semibold mb-1">
-                                            No calculator for "{selectedCategory?.name}" yet.
-                                        </p>
-                                        <p className="text-sm text-black/30 mb-5 max-w-sm mx-auto">
-                                            Create a calculator with multiple formulas to define how costs are computed.
-                                        </p>
-                                        <button
-                                            onClick={handleCreateCalculator}
-                                            className="btn-primary"
-                                        >
-                                            <Plus className="w-4 h-4" />
-                                            Create Calculator
-                                        </button>
+                                        {isRootCategory ? (
+                                            <>
+                                                <p className="text-black/40 text-base font-semibold mb-1">
+                                                    Calculators can only be added to sub-categories.
+                                                </p>
+                                                <p className="text-sm text-black/30 max-w-sm mx-auto">
+                                                    Please select or create a sub-category under "{selectedCategory?.name}" first,
+                                                    then add your calculator there.
+                                                </p>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <p className="text-black/40 text-base font-semibold mb-1">
+                                                    No calculator for "{selectedCategory?.name}" yet.
+                                                </p>
+                                                <p className="text-sm text-black/30 mb-5 max-w-sm mx-auto">
+                                                    Create a calculator with multiple formulas to define how costs are computed.
+                                                </p>
+                                                <button
+                                                    onClick={handleCreateCalculator}
+                                                    className="btn-primary"
+                                                >
+                                                    <Plus className="w-4 h-4" />
+                                                    Create Calculator
+                                                </button>
+                                            </>
+                                        )}
                                     </div>
                                 ) : (
                                     <div className="text-center py-8">

@@ -1,15 +1,21 @@
 /**
- * Supabase Sync — Single Blob Approach (v4)
+ * Supabase Sync — Single Blob Approach (v5)
  * 
  * ALL data stored in ONE row of the `app_state` table.
  * - Save = UPDATE the singleton row (no deletes ever)
  * - Load = SELECT the singleton row
  * - Realtime = listen for changes to `app_state`
  * 
- * This eliminates all multi-table, multi-row, delete-based bugs.
+ * v5 fixes:
+ * - Supabase is ALWAYS source of truth (localStorage is just offline cache)
+ * - Adds `syncReady` flag so UI can show loading state
+ * - Adds retry logic for failed loads
+ * - Adds `forceSave()` for immediate flush
+ * - Reduced self-save block window
+ * - Checks `supabaseReady` before any operations
  */
 
-import { supabase } from '../lib/supabase';
+import { supabase, supabaseReady } from '../lib/supabase';
 
 // ── Store reference ──
 let storeRef: any = null;
@@ -25,7 +31,7 @@ let isSavingToRemote = false;
  * Just one UPDATE — no deletes, no multi-table, no complexity.
  */
 async function saveToSupabase() {
-    if (isSyncingFromRemote || !storeRef) return;
+    if (isSyncingFromRemote || !storeRef || !supabaseReady) return;
 
     isSavingToRemote = true;
     const state = storeRef.getState();
@@ -58,43 +64,75 @@ async function saveToSupabase() {
         console.log('✅ Data saved to Supabase');
     }
 
-    // Block Realtime self-reload for 3 seconds
-    setTimeout(() => { isSavingToRemote = false; }, 3000);
+    // Clear any pending debounce timer — we just saved
+    if (saveTimeout) {
+        clearTimeout(saveTimeout);
+        saveTimeout = null;
+    }
+
+    // Block Realtime self-reload for 1.5 seconds (reduced from 3s)
+    setTimeout(() => { isSavingToRemote = false; }, 1500);
 }
 
 /**
  * Load state from the singleton app_state row.
+ * Supabase is ALWAYS the source of truth — overwrites localStorage.
+ * Includes retry logic for transient failures.
  */
-async function loadFromSupabase() {
-    if (!storeRef) return;
-
-    const { data, error } = await supabase
-        .from('app_state')
-        .select('*')
-        .eq('id', 'singleton')
-        .single();
-
-    if (error) {
-        console.error('❌ Load from Supabase failed:', error.message);
-        return;
+async function loadFromSupabase(retries = 3): Promise<boolean> {
+    if (!storeRef || !supabaseReady) {
+        // No Supabase credentials — mark as ready with local data only
+        if (storeRef) {
+            storeRef.setState({ syncReady: true });
+        }
+        return false;
     }
 
-    if (!data) {
-        console.log('ℹ️ No data in app_state yet');
-        return;
-    }
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        const { data, error } = await supabase
+            .from('app_state')
+            .select('*')
+            .eq('id', 'singleton')
+            .single();
 
-    const remoteCats = data.categories || [];
-    const remoteInputs = data.input_definitions || [];
-    const remoteGroups = data.input_groups || [];
-    const remoteCalcs = data.calculators || [];
+        if (error) {
+            console.error(`❌ Load from Supabase failed (attempt ${attempt}/${retries}):`, error.message);
+            if (attempt < retries) {
+                // Wait before retry (exponential backoff: 500ms, 1000ms, 2000ms)
+                await new Promise(r => setTimeout(r, 500 * attempt));
+                continue;
+            }
+            // All retries exhausted — use local data
+            console.warn('⚠️ All Supabase load attempts failed. Using local cache.');
+            storeRef.setState({ syncReady: true });
+            return false;
+        }
 
-    const hasRemoteData =
-        remoteCats.length > 0 ||
-        remoteInputs.length > 0 ||
-        remoteCalcs.length > 0;
+        if (!data) {
+            console.log('ℹ️ No data in app_state yet');
+            // Supabase is empty — push local data up if we have any
+            const state = storeRef.getState();
+            const hasLocalData =
+                state.categories.length > 0 ||
+                state.inputDefinitions.length > 0 ||
+                state.calculators.length > 0;
 
-    if (hasRemoteData) {
+            if (hasLocalData) {
+                console.log('📤 Supabase empty, pushing local data...');
+                await saveToSupabase();
+            } else {
+                console.log('ℹ️ Both Supabase and local store are empty');
+            }
+            storeRef.setState({ syncReady: true });
+            return true;
+        }
+
+        // ── We have remote data — it ALWAYS wins over localStorage ──
+        const remoteCats = data.categories || [];
+        const remoteInputs = data.input_definitions || [];
+        const remoteGroups = data.input_groups || [];
+        const remoteCalcs = data.calculators || [];
+
         console.log(`📦 Loaded from Supabase: ${remoteCats.length} categories, ${remoteInputs.length} inputs, ${remoteCalcs.length} calculators`);
         isSyncingFromRemote = true;
 
@@ -110,34 +148,27 @@ async function loadFromSupabase() {
             inputDefinitions: remoteInputs,
             inputGroups: remoteGroups,
             calculators: cleanedCalcs,
+            syncReady: true,
         });
 
         setTimeout(() => { isSyncingFromRemote = false; }, 1000);
-    } else {
-        // Supabase is empty — push local data up
-        const state = storeRef.getState();
-        const hasLocalData =
-            state.categories.length > 0 ||
-            state.inputDefinitions.length > 0 ||
-            state.calculators.length > 0;
-
-        if (hasLocalData) {
-            console.log('📤 Supabase empty, pushing local data...');
-            await saveToSupabase();
-        } else {
-            console.log('ℹ️ Both Supabase and local store are empty');
-        }
+        return true;
     }
+
+    storeRef.setState({ syncReady: true });
+    return false;
 }
 
 /**
- * Auto-save on store changes (debounced 3s).
+ * Auto-save on store changes (debounced 2s).
  */
 function startAutoSave(): () => void {
+    if (!supabaseReady) return () => {};
+
     const unsub = storeRef.subscribe(() => {
         if (isSyncingFromRemote) return;
         if (saveTimeout) clearTimeout(saveTimeout);
-        saveTimeout = setTimeout(() => { saveToSupabase(); }, 3000);
+        saveTimeout = setTimeout(() => { saveToSupabase(); }, 2000);
     });
 
     return () => {
@@ -151,6 +182,7 @@ function startAutoSave(): () => void {
  * Only reloads if the change came from another device (not our own save).
  */
 function startRealtimeSync(): () => void {
+    if (!supabaseReady) return () => {};
     if (realtimeChannel) supabase.removeChannel(realtimeChannel);
 
     realtimeChannel = supabase
@@ -159,7 +191,7 @@ function startRealtimeSync(): () => void {
             // Only reload if WE didn't just save (prevents self-overwrite)
             if (!isSyncingFromRemote && !isSavingToRemote) {
                 console.log('📡 Remote change detected, reloading...');
-                loadFromSupabase();
+                loadFromSupabase(1); // Single attempt for realtime — don't retry aggressively
             }
         })
         .subscribe((status: string) => {
@@ -173,6 +205,19 @@ function startRealtimeSync(): () => void {
     };
 }
 
+/**
+ * Force-save: immediately flush any pending changes to Supabase.
+ * Useful when navigating away from admin panel or before generating quotes.
+ */
+export async function forceSave() {
+    if (!storeRef || !supabaseReady) return;
+    if (saveTimeout) {
+        clearTimeout(saveTimeout);
+        saveTimeout = null;
+    }
+    await saveToSupabase();
+}
+
 // ── Main init ──
 
 let initialized = false;
@@ -182,6 +227,12 @@ export async function initSupabaseSync(store: any) {
     initialized = true;
 
     storeRef = store;
+
+    if (!supabaseReady) {
+        console.warn('⚠️ Supabase not configured — running in offline mode');
+        store.setState({ syncReady: true });
+        return;
+    }
 
     console.log('🚀 Initializing Supabase sync (single blob)...');
     await loadFromSupabase();
