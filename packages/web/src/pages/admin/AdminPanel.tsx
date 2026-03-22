@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
     Settings,
     FolderTree,
@@ -45,6 +45,13 @@ export function AdminPanel() {
         getCalculatorsForCategory,
         getCategoryBreadcrumb,
     } = store;
+
+    // Force-save all pending changes when leaving admin panel
+    useEffect(() => {
+        return () => {
+            store.forceSave();
+        };
+    }, []);
 
     const selectedCategory = categories.find((c) => c.id === selectedCategoryId);
     const isRootCategory = selectedCategory ? selectedCategory.parentId === null : false;
