@@ -120,7 +120,7 @@ interface AppStore {
 
 export const useAppStore = create<AppStore>()(
     persist(
-        (set, get) => ({
+        (set, get: () => AppStore) => ({
             // ══════════════════════════════════════════════════════════════════
             // SYNC STATE
             // ══════════════════════════════════════════════════════════════════
@@ -765,11 +765,7 @@ export const useAppStore = create<AppStore>()(
                 // Seed with external formula values (e.g. parent calculator results for charges)
                 if (externalFormulaValues) {
                     for (const [id, val] of Object.entries(externalFormulaValues)) {
-                        try {
-                            valueMap[id] = new Decimal(val || '0');
-                        } catch {
-                            valueMap[id] = new Decimal(0);
-                        }
+                        valueMap[id] = safeDecimal(val);
                     }
                 }
 
@@ -785,36 +781,26 @@ export const useAppStore = create<AppStore>()(
                     if (inputDef.type === 'number') {
                         const val = inputValues[inputDef.key];
                         if (val !== undefined && val !== '') {
-                            // User entered a value — use it directly
-                            try {
-                                valueMap[inputDef.id] = new Decimal(val);
-                            } catch {
-                                valueMap[inputDef.id] = new Decimal(0);
-                            }
+                            valueMap[inputDef.id] = safeDecimal(val);
                         } else {
-                            // User hasn't entered anything — fall back to admin-defined rate
-                            try {
-                                valueMap[inputDef.id] = new Decimal(inputDef.rate || '0');
-                            } catch {
-                                valueMap[inputDef.id] = new Decimal(0);
-                            }
+                            valueMap[inputDef.id] = safeDecimal(inputDef.rate);
                         }
                     } else if (inputDef.type === 'dropdown') {
                         const selected = selectedDropdowns[inputDef.key];
                         if (selected && inputDef.dropdownOptions) {
                             const opt = inputDef.dropdownOptions.find((o) => o.value === selected);
-                            valueMap[inputDef.id] = opt ? new Decimal(opt.rate || '0') : new Decimal(0);
+                            valueMap[inputDef.id] = opt ? safeDecimal(opt.rate) : new Decimal(0);
                         } else {
                             valueMap[inputDef.id] = new Decimal(0);
                         }
                     } else if (inputDef.type === 'fixed') {
-                        valueMap[inputDef.id] = new Decimal(inputDef.fixedValue || '0');
+                        valueMap[inputDef.id] = safeDecimal(inputDef.fixedValue);
                     }
                 }
 
                 // Add local rates to value map
                 for (const lr of calc.localRates) {
-                    valueMap[`local_${lr.id}`] = new Decimal(lr.rate || '0');
+                    valueMap[`local_${lr.id}`] = safeDecimal(lr.rate);
                 }
 
                 // Evaluate formulas in order
@@ -823,9 +809,16 @@ export const useAppStore = create<AppStore>()(
                 for (const formula of sortedFormulas) {
                     try {
                         const result = evaluateTokens(formula.tokens, valueMap);
-                        formulaResults[formula.key] = result.toFixed(2);
-                        valueMap[formula.id] = result; // Allow later formulas to reference
-                    } catch {
+                        if (result.isNaN() || !result.isFinite()) {
+                            console.warn(`[Calc] Formula "${formula.label}" (${formula.key}) produced NaN/Infinity, defaulting to 0`);
+                            formulaResults[formula.key] = '0';
+                            valueMap[formula.id] = new Decimal(0);
+                        } else {
+                            formulaResults[formula.key] = result.toFixed(2);
+                            valueMap[formula.id] = result;
+                        }
+                    } catch (err) {
+                        console.warn(`[Calc] Formula "${formula.label}" (${formula.key}) threw error, defaulting to 0:`, err);
                         formulaResults[formula.key] = '0';
                         valueMap[formula.id] = new Decimal(0);
                     }
@@ -836,17 +829,17 @@ export const useAppStore = create<AppStore>()(
                 const totalFormulas = sortedFormulas.filter((f) => f.isTotal);
                 if (totalFormulas.length > 0) {
                     for (const f of totalFormulas) {
-                        total = total.plus(new Decimal(formulaResults[f.key] || '0'));
+                        total = total.plus(safeDecimal(formulaResults[f.key]));
                     }
                 } else if (sortedFormulas.length > 0) {
                     const last = sortedFormulas[sortedFormulas.length - 1];
-                    total = new Decimal(formulaResults[last.key] || '0');
+                    total = safeDecimal(formulaResults[last.key]);
                 }
 
                 // Add user temp items
                 for (const item of userTempItems) {
                     if (item.rate) {
-                        total = total.plus(new Decimal(item.rate || '0'));
+                        total = total.plus(safeDecimal(item.rate));
                     }
                 }
 
@@ -875,12 +868,27 @@ export const useAppStore = create<AppStore>()(
 setTimeout(() => { initSupabaseSync(useAppStore); }, 500);
 
 
+// ─── Safe Decimal Helper ────────────────────────────────────────────
+// NEVER throws — always returns a valid Decimal. Handles null, undefined,
+// empty string, NaN, and any other garbage that might come from Supabase.
+
+function safeDecimal(val: any): Decimal {
+    if (val === null || val === undefined || val === '') return new Decimal(0);
+    if (val instanceof Decimal) return val;
+    try {
+        const d = new Decimal(val);
+        return d.isNaN() || !d.isFinite() ? new Decimal(0) : d;
+    } catch {
+        return new Decimal(0);
+    }
+}
+
 // ─── Token Evaluator ────────────────────────────────────────────────
 
 function evaluateTokens(tokens: FormulaToken[], values: Record<string, Decimal>): Decimal {
-    if (tokens.length === 0) return new Decimal(0);
+    if (!tokens || tokens.length === 0) return new Decimal(0);
 
-    // Build an expression string and evaluate using basic shunting-yard
+    // Shunting-yard algorithm for expression evaluation
     const outputQueue: Decimal[] = [];
     const operatorStack: string[] = [];
 
@@ -905,24 +913,44 @@ function evaluateTokens(tokens: FormulaToken[], values: Record<string, Decimal>)
         }
     };
 
+    // Safe operator application — handles insufficient operands gracefully
+    const safeApply = (op: string): void => {
+        if (outputQueue.length >= 2) {
+            const b = outputQueue.pop()!;
+            const a = outputQueue.pop()!;
+            outputQueue.push(applyOp(op, b, a));
+        } else if (outputQueue.length === 1) {
+            // Unary case: treat missing left operand as 0
+            const b = outputQueue.pop()!;
+            outputQueue.push(applyOp(op, b, new Decimal(0)));
+            console.warn(`[Calc] Insufficient operands for operator "${op}", used 0 as default`);
+        } else {
+            // No operands at all — push 0
+            outputQueue.push(new Decimal(0));
+            console.warn(`[Calc] No operands for operator "${op}", pushed 0`);
+        }
+    };
+
     for (const token of tokens) {
+        if (!token || !token.type) continue; // skip malformed tokens
+
         if (token.type === 'input' || token.type === 'formula_ref') {
-            const val = values[token.value] || new Decimal(0);
-            outputQueue.push(val);
+            // Use ?? (nullish coalescing) instead of || so that Decimal(0) is preserved
+            const val = values[token.value] ?? new Decimal(0);
+            outputQueue.push(val instanceof Decimal ? val : safeDecimal(val));
         } else if (token.type === 'number') {
-            outputQueue.push(new Decimal(token.value || '0'));
+            outputQueue.push(safeDecimal(token.value));
         } else if (token.type === 'bracket') {
             if (token.value === '(') {
                 operatorStack.push('(');
             } else if (token.value === ')') {
                 while (operatorStack.length > 0 && operatorStack[operatorStack.length - 1] !== '(') {
                     const op = operatorStack.pop()!;
-                    if (outputQueue.length < 2) break;
-                    const b = outputQueue.pop()!;
-                    const a = outputQueue.pop()!;
-                    outputQueue.push(applyOp(op, b, a));
+                    safeApply(op);
                 }
-                operatorStack.pop(); // remove '('
+                if (operatorStack.length > 0 && operatorStack[operatorStack.length - 1] === '(') {
+                    operatorStack.pop(); // remove '('
+                }
             }
         } else if (token.type === 'operator') {
             while (
@@ -932,10 +960,7 @@ function evaluateTokens(tokens: FormulaToken[], values: Record<string, Decimal>)
                 (precedence[token.value] || 0)
             ) {
                 const op = operatorStack.pop()!;
-                if (outputQueue.length < 2) break;
-                const b = outputQueue.pop()!;
-                const a = outputQueue.pop()!;
-                outputQueue.push(applyOp(op, b, a));
+                safeApply(op);
             }
             operatorStack.push(token.value);
         }
@@ -945,11 +970,10 @@ function evaluateTokens(tokens: FormulaToken[], values: Record<string, Decimal>)
     while (operatorStack.length > 0) {
         const op = operatorStack.pop()!;
         if (op === '(' || op === ')') continue;
-        if (outputQueue.length < 2) break;
-        const b = outputQueue.pop()!;
-        const a = outputQueue.pop()!;
-        outputQueue.push(applyOp(op, b, a));
+        safeApply(op);
     }
 
-    return outputQueue.length > 0 ? outputQueue[0] : new Decimal(0);
+    const finalResult = outputQueue.length > 0 ? outputQueue[0] : new Decimal(0);
+    // Final safety check — ensure we never return NaN or Infinity
+    return finalResult.isNaN() || !finalResult.isFinite() ? new Decimal(0) : finalResult;
 }
