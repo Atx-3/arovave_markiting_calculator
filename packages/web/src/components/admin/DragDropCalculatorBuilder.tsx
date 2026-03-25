@@ -813,6 +813,9 @@ export function DragDropCalculatorBuilder({ calculatorId }: { calculatorId: stri
                                 onToggleHidden={() =>
                                     updateFormula(calculatorId, formula.id, { hidden: !formula.hidden })
                                 }
+                                onToggleRound={() =>
+                                    updateFormula(calculatorId, formula.id, { roundResult: !formula.roundResult })
+                                }
                                 onInsertToken={(index, token) => insertTokenInFormula(formula.id, index, token)}
                                 onRemoveToken={(tokenIdx) =>
                                     removeTokenFromFormula(formula.id, tokenIdx)
@@ -1059,6 +1062,7 @@ function FormulaCard({
     onUpdateLabel,
     onToggleTotal,
     onToggleHidden,
+    onToggleRound,
     onInsertToken,
     onRemoveToken,
     onSaveFormula,
@@ -1075,7 +1079,7 @@ function FormulaCard({
     onCursorChange,
 }: {
     calculatorId: string;
-    formula: { id: string; label: string; tokens: FormulaToken[]; isTotal?: boolean; hidden?: boolean; order: number };
+    formula: { id: string; label: string; tokens: FormulaToken[]; isTotal?: boolean; hidden?: boolean; roundResult?: boolean; minResult?: string; maxResult?: string; order: number };
     index: number;
     totalFormulas: number;
     isActive: boolean;
@@ -1090,6 +1094,7 @@ function FormulaCard({
     onUpdateLabel: (label: string) => void;
     onToggleTotal: () => void;
     onToggleHidden: () => void;
+    onToggleRound: () => void;
     onInsertToken: (index: number, token: FormulaToken) => void;
     onRemoveToken: (index: number) => void;
     onSaveFormula: () => void;
@@ -1127,7 +1132,7 @@ function FormulaCard({
         if (numberValue) {
             insertAtCursor({ type: 'number', value: numberValue });
             setNumberValue('');
-            setShowNumberInput(false);
+            // Keep the dialog open so user can add more numbers without reopening
         }
     };
 
@@ -1217,6 +1222,22 @@ function FormulaCard({
                     <span className="text-[9px] font-bold uppercase tracking-wider text-amber-500 bg-amber-50 px-1.5 py-0.5 rounded-md">Hidden</span>
                 )}
 
+                {/* Round badge */}
+                {formula.roundResult && (
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded-md">≈ Rounded</span>
+                )}
+
+                {/* Min/Max badge */}
+                {(formula.minResult || formula.maxResult) && (
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-teal-500 bg-teal-50 px-1.5 py-0.5 rounded-md">
+                        {formula.minResult && formula.maxResult
+                            ? `${formula.minResult}–${formula.maxResult}`
+                            : formula.minResult
+                                ? `Min ${formula.minResult}`
+                                : `Max ${formula.maxResult}`}
+                    </span>
+                )}
+
                 {/* Actions */}
                 <div className="flex items-center gap-0.5 shrink-0">
                     {/* Edit button for saved formulas */}
@@ -1243,6 +1264,16 @@ function FormulaCard({
                         title={formula.hidden ? 'Show on sales page' : 'Hide from sales page'}
                     >
                         {formula.hidden ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleRound();
+                        }}
+                        className={`p-1 rounded transition-colors text-sm font-bold ${formula.roundResult ? 'text-indigo-500 hover:text-indigo-600 bg-indigo-50' : 'text-black/15 hover:text-black'}`}
+                        title={formula.roundResult ? 'Rounding ON — click to disable' : 'Round result to nearest whole number'}
+                    >
+                        ≈
                     </button>
                     <button
                         onClick={(e) => {
@@ -1453,7 +1484,7 @@ function FormulaCard({
 
                         {/* Number */}
                         {showNumberInput ? (
-                            <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                                 <input
                                     type="text"
                                     value={numberValue}
@@ -1475,16 +1506,16 @@ function FormulaCard({
                                     <Plus className="w-3 h-3" />
                                 </button>
                                 <button
-                                    onClick={() => setShowNumberInput(false)}
+                                    onClick={(e) => { e.stopPropagation(); setShowNumberInput(false); }}
                                     className="p-1.5 rounded-lg text-black/30 hover:text-black transition-colors"
-                                    title="Cancel"
+                                    title="Close"
                                 >
                                     <X className="w-3 h-3" />
                                 </button>
                             </div>
                         ) : (
                             <button
-                                onClick={() => setShowNumberInput(true)}
+                                onClick={(e) => { e.stopPropagation(); setShowNumberInput(true); }}
                                 className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-black/40 hover:text-black hover:bg-black/[0.03] transition-colors"
                                 title="Add a number value"
                             >
@@ -1516,6 +1547,55 @@ function FormulaCard({
                                 ))}
                             </div>
                         )}
+                    </div>
+
+                    {/* ═══ ROUND / MIN / MAX OPTIONS ═══ */}
+                    <div className="flex items-center gap-4 flex-wrap px-1">
+                        {/* Round toggle */}
+                        <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                            <input
+                                type="checkbox"
+                                checked={formula.roundResult || false}
+                                onChange={(e) => { e.stopPropagation(); onToggleRound(); }}
+                                onClick={(e) => e.stopPropagation()}
+                                className="w-3.5 h-3.5 rounded border-black/20 text-indigo-500 focus:ring-indigo-300 cursor-pointer"
+                            />
+                            <span className="text-[11px] font-semibold text-black/40">Round off</span>
+                        </label>
+
+                        {/* Min */}
+                        <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] font-semibold text-black/40">Min</span>
+                            <input
+                                type="text"
+                                inputMode="decimal"
+                                value={formula.minResult || ''}
+                                onChange={(e) => {
+                                    const v = e.target.value.replace(/[^0-9.\-]/g, '').replace(/(\..*)\./,  '$1');
+                                    useAppStore.getState().updateFormula(calculatorId, formula.id, { minResult: v });
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                                placeholder="—"
+                                className="w-16 text-xs font-mono font-semibold text-black bg-black/[0.03] rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-teal-200 border border-black/5"
+                            />
+                        </div>
+
+                        {/* Max */}
+                        <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] font-semibold text-black/40">Max</span>
+                            <input
+                                type="text"
+                                inputMode="decimal"
+                                value={formula.maxResult || ''}
+                                onChange={(e) => {
+                                    const v = e.target.value.replace(/[^0-9.\-]/g, '').replace(/(\..*)\./,  '$1');
+                                    useAppStore.getState().updateFormula(calculatorId, formula.id, { maxResult: v });
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                                placeholder="—"
+                                className="w-16 text-xs font-mono font-semibold text-black bg-black/[0.03] rounded-lg px-2 py-1 outline-none focus:ring-2 focus:ring-teal-200 border border-black/5"
+                            />
+                        </div>
                     </div>
 
                     {/* ═══ SAVE / DISCARD BUTTONS ═══ */}

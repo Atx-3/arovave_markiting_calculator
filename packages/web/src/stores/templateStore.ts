@@ -808,12 +808,25 @@ export const useAppStore = create<AppStore>()(
 
                 for (const formula of sortedFormulas) {
                     try {
-                        const result = evaluateTokens(formula.tokens, valueMap);
+                        let result = evaluateTokens(formula.tokens, valueMap);
                         if (result.isNaN() || !result.isFinite()) {
                             console.warn(`[Calc] Formula "${formula.label}" (${formula.key}) produced NaN/Infinity, defaulting to 0`);
                             formulaResults[formula.key] = '0';
                             valueMap[formula.id] = new Decimal(0);
                         } else {
+                            // Apply rounding if enabled on this formula
+                            if (formula.roundResult) {
+                                result = result.round();
+                            }
+                            // Apply min/max clamping
+                            if (formula.minResult && formula.minResult !== '') {
+                                const min = safeDecimal(formula.minResult);
+                                if (result.lt(min)) result = min;
+                            }
+                            if (formula.maxResult && formula.maxResult !== '') {
+                                const max = safeDecimal(formula.maxResult);
+                                if (result.gt(max)) result = max;
+                            }
                             formulaResults[formula.key] = result.toFixed(2);
                             valueMap[formula.id] = result;
                         }

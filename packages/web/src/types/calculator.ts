@@ -88,6 +88,9 @@ export interface CalculatorFormula {
     tokens: FormulaToken[];
     isTotal?: boolean;
     hidden?: boolean;       // hidden from sales page but still contributes to totals
+    roundResult?: boolean;  // round the result to nearest integer (e.g., 2.3→2, 3.7→4)
+    minResult?: string;     // clamp result: if result < min, use min
+    maxResult?: string;     // clamp result: if result > max, use max
     order: number;
 }
 
