@@ -18,6 +18,7 @@ import type {
     FormulaToken,
     LocalRate,
     RefTree,
+    RefTreeNode,
     ReferenceItem,
     UserTempItem,
 } from '../types/calculator';
@@ -72,6 +73,12 @@ interface AppStore {
 
     // ── Input Ref Tree ──
     setRefTree: (inputId: string, refTree: RefTree | undefined) => void;
+    addRefTreeNode: (inputId: string, parentPath: string[]) => void;
+    removeRefTreeNode: (inputId: string, nodeId: string, parentPath: string[]) => void;
+    updateRefTreeNode: (inputId: string, nodeId: string, parentPath: string[], updates: Partial<RefTreeNode>) => void;
+    updateRefTreeLevel: (inputId: string, index: number, name: string) => void;
+    addRefTreeLevel: (inputId: string) => void;
+    removeRefTreeLevel: (inputId: string, index: number) => void;
 
     // ── Calculators ──
     calculators: Calculator[];
@@ -208,6 +215,7 @@ export const useAppStore = create<AppStore>()(
                     number: 'New Input',
                     dropdown: 'New Dropdown',
                     fixed: 'New Fixed Cost',
+                    reference_list: 'New Reference List',
                 };
                 const name = defaultNames[type];
                 const newInput: InputDefinition = {
@@ -219,6 +227,7 @@ export const useAppStore = create<AppStore>()(
                     order,
                     fixedValue: type === 'fixed' ? '0' : undefined,
                     dropdownOptions: type === 'dropdown' ? [] : undefined,
+                    refTree: type === 'reference_list' ? { levels: ['Category', 'Sub Category', 'Item'], nodes: [] } : undefined,
                     isRequired: false,
                 };
                 set({ inputDefinitions: [...get().inputDefinitions, newInput] });
@@ -417,6 +426,99 @@ export const useAppStore = create<AppStore>()(
                     inputDefinitions: get().inputDefinitions.map((i) =>
                         i.id === inputId ? { ...i, refTree } : i,
                     ),
+                });
+            },
+
+            addRefTreeNode(inputId, parentPath) {
+                set({
+                    inputDefinitions: get().inputDefinitions.map((i) => {
+                        if (i.id !== inputId) return i;
+                        // Auto-initialize refTree if not present
+                        const refTree = i.refTree
+                            ? (JSON.parse(JSON.stringify(i.refTree)) as RefTree)
+                            : { levels: ['Category', 'Sub Category', 'Item'], nodes: [] };
+                        let nodes = refTree.nodes;
+                        for (const pathId of parentPath) {
+                            const found = nodes.find((n) => n.id === pathId);
+                            if (found) {
+                                if (!found.children) found.children = [];
+                                nodes = found.children;
+                            } else return i;
+                        }
+                        nodes.push({ id: uid(), name: '', children: [], rate: '' });
+                        return { ...i, refTree };
+                    }),
+                });
+            },
+
+            removeRefTreeNode(inputId, nodeId, parentPath) {
+                set({
+                    inputDefinitions: get().inputDefinitions.map((i) => {
+                        if (i.id !== inputId || !i.refTree) return i;
+                        const tree = JSON.parse(JSON.stringify(i.refTree)) as RefTree;
+                        let nodes = tree.nodes;
+                        for (const pathId of parentPath) {
+                            const found = nodes.find((n) => n.id === pathId);
+                            if (found) {
+                                if (!found.children) found.children = [];
+                                nodes = found.children;
+                            } else return i;
+                        }
+                        const idx = nodes.findIndex((n) => n.id === nodeId);
+                        if (idx >= 0) nodes.splice(idx, 1);
+                        return { ...i, refTree: tree };
+                    }),
+                });
+            },
+
+            updateRefTreeNode(inputId, nodeId, parentPath, updates) {
+                set({
+                    inputDefinitions: get().inputDefinitions.map((i) => {
+                        if (i.id !== inputId || !i.refTree) return i;
+                        const tree = JSON.parse(JSON.stringify(i.refTree)) as RefTree;
+                        let nodes = tree.nodes;
+                        for (const pathId of parentPath) {
+                            const found = nodes.find((n) => n.id === pathId);
+                            if (found) {
+                                if (!found.children) found.children = [];
+                                nodes = found.children;
+                            } else return i;
+                        }
+                        const node = nodes.find((n) => n.id === nodeId);
+                        if (node) Object.assign(node, updates);
+                        return { ...i, refTree: tree };
+                    }),
+                });
+            },
+
+            updateRefTreeLevel(inputId, index, name) {
+                set({
+                    inputDefinitions: get().inputDefinitions.map((i) => {
+                        if (i.id !== inputId || !i.refTree) return i;
+                        const levels = [...i.refTree.levels];
+                        if (index >= 0 && index < levels.length) levels[index] = name;
+                        return { ...i, refTree: { ...i.refTree, levels } };
+                    }),
+                });
+            },
+
+            addRefTreeLevel(inputId) {
+                set({
+                    inputDefinitions: get().inputDefinitions.map((i) => {
+                        if (i.id !== inputId || !i.refTree) return i;
+                        return { ...i, refTree: { ...i.refTree, levels: [...i.refTree.levels, `Level ${i.refTree.levels.length + 1}`] } };
+                    }),
+                });
+            },
+
+            removeRefTreeLevel(inputId, index) {
+                set({
+                    inputDefinitions: get().inputDefinitions.map((i) => {
+                        if (i.id !== inputId || !i.refTree) return i;
+                        if (i.refTree.levels.length <= 1) return i; // keep at least 1 level
+                        const levels = i.refTree.levels.filter((_, idx) => idx !== index);
+                        return { ...i, refTree: { ...i.refTree, levels } };
+                    }),
                 });
             },
 
@@ -795,6 +897,28 @@ export const useAppStore = create<AppStore>()(
                         }
                     } else if (inputDef.type === 'fixed') {
                         valueMap[inputDef.id] = safeDecimal(inputDef.fixedValue);
+                    } else if (inputDef.type === 'reference_list') {
+                        // reference_list: the selected leaf path is stored in selectedDropdowns as JSON
+                        const pathJson = selectedDropdowns[inputDef.key];
+                        if (pathJson && inputDef.refTree) {
+                            try {
+                                const pathIds: string[] = JSON.parse(pathJson);
+                                let nodes = inputDef.refTree.nodes;
+                                let leafRate = '0';
+                                for (const pid of pathIds) {
+                                    const found = nodes.find((n) => n.id === pid);
+                                    if (found) {
+                                        if (found.rate) leafRate = found.rate;
+                                        nodes = found.children || [];
+                                    } else break;
+                                }
+                                valueMap[inputDef.id] = safeDecimal(leafRate);
+                            } catch {
+                                valueMap[inputDef.id] = new Decimal(0);
+                            }
+                        } else {
+                            valueMap[inputDef.id] = new Decimal(0);
+                        }
                     }
                 }
 

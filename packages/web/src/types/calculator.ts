@@ -14,7 +14,7 @@ export interface Category {
 
 // ─── Centralized Input Definitions ────────────────────────────────────
 
-export type InputType = 'number' | 'dropdown' | 'fixed';
+export type InputType = 'number' | 'dropdown' | 'fixed' | 'reference_list';
 
 export interface DropdownOption {
     id: string;

@@ -1022,6 +1022,14 @@ function CalcSection({
                                             ₹{inputDef.fixedValue || '0'}
                                         </span>
                                     )}
+
+                                    {inputDef.type === 'reference_list' && inputDef.refTree && (
+                                        <ReferenceListDropdowns
+                                            inputDef={inputDef}
+                                            selectedPath={dropdowns[inputDef.key] || ''}
+                                            onSelect={(pathJson) => onSetDropdown(inputDef.key, pathJson)}
+                                        />
+                                    )}
                                 </div>
                             </div>
                         ))}
@@ -1153,6 +1161,106 @@ function CalcSection({
                             )}
                         </>
                     )}
+                </div>
+            )}
+        </div>
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// REFERENCE LIST DROPDOWNS — Cascading dropdowns for multilevel ref tree
+// ═══════════════════════════════════════════════════════════════════════
+
+function ReferenceListDropdowns({
+    inputDef,
+    selectedPath,
+    onSelect,
+}: {
+    inputDef: InputDefinition;
+    selectedPath: string;
+    onSelect: (pathJson: string) => void;
+}) {
+    const refTree = inputDef.refTree;
+    if (!refTree) return null;
+
+    // Parse the stored path (JSON array of node IDs)
+    let pathIds: string[] = [];
+    try {
+        if (selectedPath) pathIds = JSON.parse(selectedPath);
+    } catch { /* ignore */ }
+
+    // Build the cascading dropdowns data
+    const dropdownData: { levelName: string; nodes: RefTreeNode[]; selectedId: string }[] = [];
+
+    let currentNodes = refTree.nodes;
+    for (let levelIdx = 0; levelIdx < refTree.levels.length; levelIdx++) {
+        const selectedId = pathIds[levelIdx] || '';
+        dropdownData.push({
+            levelName: refTree.levels[levelIdx],
+            nodes: currentNodes,
+            selectedId,
+        });
+
+        if (selectedId) {
+            const selected = currentNodes.find((n) => n.id === selectedId);
+            if (selected && selected.children && selected.children.length > 0) {
+                currentNodes = selected.children;
+            } else {
+                break; // leaf reached or no children
+            }
+        } else {
+            break; // no selection at this level, don't show further
+        }
+    }
+
+    const handleChange = (levelIdx: number, nodeId: string) => {
+        // Truncate path to this level and set the new selection
+        const newPath = pathIds.slice(0, levelIdx);
+        if (nodeId) newPath.push(nodeId);
+        onSelect(JSON.stringify(newPath));
+    };
+
+    // Find the rate of the deepest selected node
+    let selectedRate = '';
+    if (pathIds.length > 0 && refTree.nodes.length > 0) {
+        let nodes = refTree.nodes;
+        for (const pid of pathIds) {
+            const found = nodes.find((n) => n.id === pid);
+            if (found) {
+                if (found.rate) selectedRate = found.rate;
+                nodes = found.children || [];
+            } else break;
+        }
+    }
+
+    return (
+        <div className="space-y-2 w-full">
+            {dropdownData.map((dd, idx) => (
+                <div key={idx}>
+                    {idx > 0 && (
+                        <label className="text-[10px] text-black/40 font-semibold block mb-0.5 mt-1">
+                            {dd.levelName}
+                        </label>
+                    )}
+                    <select
+                        value={dd.selectedId}
+                        onChange={(e) => handleChange(idx, e.target.value)}
+                        className="w-full rounded-md bg-white border border-black/10 px-3 py-1.5 text-sm text-black outline-none focus:ring-1 focus:ring-black/10"
+                        title={dd.levelName}
+                    >
+                        <option value="">Select {dd.levelName}...</option>
+                        {dd.nodes.map((node) => (
+                            <option key={node.id} value={node.id}>
+                                {node.name || 'Unnamed'}
+                                {(!node.children || node.children.length === 0) && node.rate ? ` — ₹${node.rate}` : ''}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+            ))}
+            {selectedRate && (
+                <div className="text-right text-xs text-black/40 font-mono">
+                    Rate: ₹{selectedRate}
                 </div>
             )}
         </div>

@@ -19,7 +19,7 @@ import {
     Undo2,
 } from 'lucide-react';
 import { useAppStore } from '../../stores/templateStore';
-import type { InputType, InputDefinition } from '../../types/calculator';
+import type { InputType, InputDefinition, RefTreeNode, RefTree } from '../../types/calculator';
 
 // ═══════════════════════════════════════════════════════════════════════
 // INPUT HUB — Centralized Input Management
@@ -29,6 +29,7 @@ const TYPE_META: Record<InputType, { label: string; icon: typeof Hash; color: st
     number: { label: 'Number', icon: Hash, color: 'bg-blue-50 text-blue-600 border-blue-200' },
     dropdown: { label: 'Dropdown', icon: List, color: 'bg-purple-50 text-purple-600 border-purple-200' },
     fixed: { label: 'Fixed', icon: Lock, color: 'bg-amber-50 text-amber-600 border-amber-200' },
+    reference_list: { label: 'Reference List', icon: FolderTree, color: 'bg-teal-50 text-teal-600 border-teal-200' },
 };
 
 export function InputHub() {
@@ -46,6 +47,12 @@ export function InputHub() {
         addReferenceItem,
         removeReferenceItem,
         updateReferenceItem,
+        addRefTreeNode,
+        removeRefTreeNode,
+        updateRefTreeNode,
+        updateRefTreeLevel,
+        addRefTreeLevel,
+        removeRefTreeLevel,
     } = store;
 
     const [search, setSearch] = useState('');
@@ -116,6 +123,7 @@ export function InputHub() {
                                                         {type === 'number' && 'User enters a number value'}
                                                         {type === 'dropdown' && 'User picks from options'}
                                                         {type === 'fixed' && 'Admin-set constant value'}
+                                                        {type === 'reference_list' && 'Multilevel category drill-down'}
                                                     </span>
                                                 </div>
                                             </button>
@@ -176,6 +184,12 @@ export function InputHub() {
                             onUpdateReferenceItem={(itemId, updates) =>
                                 updateReferenceItem(input.id, itemId, updates)
                             }
+                            onAddRefTreeNode={(parentPath) => addRefTreeNode(input.id, parentPath)}
+                            onRemoveRefTreeNode={(nodeId, parentPath) => removeRefTreeNode(input.id, nodeId, parentPath)}
+                            onUpdateRefTreeNode={(nodeId, parentPath, updates) => updateRefTreeNode(input.id, nodeId, parentPath, updates)}
+                            onUpdateRefTreeLevel={(index, name) => updateRefTreeLevel(input.id, index, name)}
+                            onAddRefTreeLevel={() => addRefTreeLevel(input.id)}
+                            onRemoveRefTreeLevel={(index) => removeRefTreeLevel(input.id, index)}
                         />
                     ))}
                 </div>
@@ -216,6 +230,12 @@ function InputCard({
     onAddReferenceItem,
     onRemoveReferenceItem,
     onUpdateReferenceItem,
+    onAddRefTreeNode,
+    onRemoveRefTreeNode,
+    onUpdateRefTreeNode,
+    onUpdateRefTreeLevel,
+    onAddRefTreeLevel,
+    onRemoveRefTreeLevel,
 }: {
     input: InputDefinition;
     index: number;
@@ -232,6 +252,12 @@ function InputCard({
     onAddReferenceItem: () => void;
     onRemoveReferenceItem: (id: string) => void;
     onUpdateReferenceItem: (id: string, updates: Record<string, string>) => void;
+    onAddRefTreeNode: (parentPath: string[]) => void;
+    onRemoveRefTreeNode: (nodeId: string, parentPath: string[]) => void;
+    onUpdateRefTreeNode: (nodeId: string, parentPath: string[], updates: Partial<RefTreeNode>) => void;
+    onUpdateRefTreeLevel: (index: number, name: string) => void;
+    onAddRefTreeLevel: () => void;
+    onRemoveRefTreeLevel: (index: number) => void;
 }) {
     const meta = TYPE_META[input.type];
     const Icon = meta.icon;
@@ -539,7 +565,38 @@ function InputCard({
                                     </button>
                                 </div>
                             ))}
+
+                            {/* Multilevel Sub-References Tree */}
+                            <div className="mt-3 pt-3 border-t border-black/5">
+                                {!input.refTree ? (
+                                    <button
+                                        onClick={() => onAddRefTreeNode([])}
+                                        className="w-full py-2.5 rounded-xl border-2 border-dashed border-teal-200 text-teal-600 text-xs font-semibold hover:bg-teal-50/50 transition-colors flex items-center justify-center gap-2"
+                                        title="Add reference tree"
+                                    >
+                                        <FolderTree className="w-3.5 h-3.5" />
+                                        Add Reference Tree
+                                    </button>
+                                ) : (
+                                    <RefTreeEditorSection
+                                        refTree={input.refTree}
+                                        onAddNode={onAddRefTreeNode}
+                                        onRemoveNode={onRemoveRefTreeNode}
+                                        onUpdateNode={onUpdateRefTreeNode}
+                                    />
+                                )}
+                            </div>
                         </div>
+                    )}
+
+                    {/* Reference List Tree Editor */}
+                    {input.type === 'reference_list' && input.refTree && (
+                        <RefTreeEditorSection
+                            refTree={input.refTree}
+                            onAddNode={onAddRefTreeNode}
+                            onRemoveNode={onRemoveRefTreeNode}
+                            onUpdateNode={onUpdateRefTreeNode}
+                        />
                     )}
 
                     {/* Usage info */}
@@ -655,3 +712,190 @@ function DeleteConfirmModal({
         </div>
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// REF TREE EDITOR — Simple tree like CategoryTree
+// ═══════════════════════════════════════════════════════════════════════
+
+
+function RefTreeEditorSection({
+    refTree,
+    onAddNode,
+    onRemoveNode,
+    onUpdateNode,
+}: {
+    refTree: RefTree;
+    onAddNode: (parentPath: string[]) => void;
+    onRemoveNode: (nodeId: string, parentPath: string[]) => void;
+    onUpdateNode: (nodeId: string, parentPath: string[], updates: Partial<RefTreeNode>) => void;
+    onUpdateLevel?: (index: number, name: string) => void;
+    onAddLevel?: () => void;
+    onRemoveLevel?: (index: number) => void;
+}) {
+    return (
+        <div className="space-y-3">
+            <div className="flex items-center justify-between">
+                <h3 className="text-base font-bold text-black">Reference Tree</h3>
+                <button
+                    onClick={() => onAddNode([])}
+                    className="flex items-center gap-1.5 text-sm font-semibold text-black/50 hover:text-black transition-colors bg-black/[0.04] px-3 py-1.5 rounded-xl hover:bg-black/[0.06]"
+                    title="Add root reference"
+                >
+                    <FolderTree className="w-4 h-4" />
+                    Add Root
+                </button>
+            </div>
+
+            {refTree.nodes.length === 0 && (
+                <p className="text-base text-black/30 text-center py-4">
+                    No references yet. Click "Add Root" to start.
+                </p>
+            )}
+
+            <div className="space-y-2">
+                {refTree.nodes.map((node) => (
+                    <RefTreeNodeRow
+                        key={node.id}
+                        node={node}
+                        depth={0}
+                        parentPath={[]}
+                        onAddNode={onAddNode}
+                        onRemoveNode={onRemoveNode}
+                        onUpdateNode={onUpdateNode}
+                    />
+                ))}
+            </div>
+        </div>
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// REF TREE NODE ROW — Matches CategoryTree style, unlimited nesting
+// ═══════════════════════════════════════════════════════════════════════
+
+const DEPTH_BORDERS = [
+    'border-l-black/20',
+    'border-l-black/15',
+    'border-l-black/10',
+    'border-l-black/8',
+    'border-l-black/6',
+];
+
+function RefTreeNodeRow({
+    node,
+    depth,
+    parentPath,
+    onAddNode,
+    onRemoveNode,
+    onUpdateNode,
+}: {
+    node: RefTreeNode;
+    depth: number;
+    parentPath: string[];
+    onAddNode: (parentPath: string[]) => void;
+    onRemoveNode: (nodeId: string, parentPath: string[]) => void;
+    onUpdateNode: (nodeId: string, parentPath: string[], updates: Partial<RefTreeNode>) => void;
+}) {
+    const [expanded, setExpanded] = useState(true);
+    const hasChildren = node.children && node.children.length > 0;
+    const borderStyle = DEPTH_BORDERS[depth % DEPTH_BORDERS.length];
+
+    return (
+        <div className={`rounded-2xl overflow-hidden border-l-[3px] ${borderStyle} ${depth > 0 ? 'ml-6' : ''}`}>
+            {/* Node row */}
+            <div className="flex items-center gap-3 py-3 px-4 bg-black/[0.02] hover:bg-black/[0.04] group transition-all duration-200">
+                {/* Expand/collapse */}
+                <button
+                    onClick={() => setExpanded(!expanded)}
+                    className={`p-1 rounded-md transition-colors hover:bg-black/[0.03] ${hasChildren ? 'opacity-100' : 'opacity-30'}`}
+                    title={expanded ? 'Collapse' : 'Expand'}
+                >
+                    {expanded ? (
+                        <ChevronDown className="w-4 h-4 text-black/50" />
+                    ) : (
+                        <ChevronRight className="w-4 h-4 text-black" />
+                    )}
+                </button>
+
+                {/* Icon */}
+                <FolderTree className="w-4 h-4 shrink-0 text-teal-500" />
+
+                {/* Name input */}
+                <input
+                    type="text"
+                    value={node.name}
+                    onChange={(e) => onUpdateNode(node.id, parentPath, { name: e.target.value })}
+                    placeholder="Name..."
+                    className="flex-1 text-base font-bold text-black bg-transparent outline-none placeholder:text-black/30"
+                />
+
+                {/* Rate input — only on leaf nodes (no children) */}
+                {!hasChildren && (
+                <div className="flex items-center gap-1 shrink-0">
+                    <span className="text-[10px] text-black/30 font-semibold">₹</span>
+                    <input
+                        type="text"
+                        inputMode="decimal"
+                        value={node.rate || ''}
+                        onChange={(e) => {
+                            const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./, '$1');
+                            onUpdateNode(node.id, parentPath, { rate: v });
+                        }}
+                        placeholder="Rate"
+                        className="w-20 text-sm text-black bg-white border border-black/10 rounded-lg px-2 py-1 outline-none placeholder:text-black/20 font-mono text-right focus:ring-1 focus:ring-black/10"
+                    />
+                </div>
+                )}
+
+                {/* Sub-count badge */}
+                {hasChildren && (
+                    <span className="text-[10px] text-black bg-white px-2 py-0.5 rounded-full shrink-0">
+                        {node.children!.length} sub
+                    </span>
+                )}
+
+                {/* Actions — visible on hover */}
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                    {/* Add child */}
+                    <button
+                        onClick={() => {
+                            onAddNode([...parentPath, node.id]);
+                            setExpanded(true);
+                        }}
+                        className="p-1.5 rounded-xl hover:bg-teal-50 text-black/40 hover:text-teal-600 transition-colors"
+                        title="Add sub-reference"
+                    >
+                        <Plus className="w-4 h-4" />
+                    </button>
+                    {/* Delete */}
+                    <button
+                        onClick={() => onRemoveNode(node.id, parentPath)}
+                        className="p-1.5 rounded-xl hover:bg-red-50 text-black/40 hover:text-red-500 transition-colors"
+                        title="Delete"
+                    >
+                        <Trash2 className="w-4 h-4" />
+                    </button>
+                </div>
+            </div>
+
+            {/* Children */}
+            {expanded && (
+                <div className="space-y-2 py-2 px-2">
+                    {node.children?.map((child) => (
+                        <RefTreeNodeRow
+                            key={child.id}
+                            node={child}
+                            depth={depth + 1}
+                            parentPath={[...parentPath, node.id]}
+                            onAddNode={onAddNode}
+                            onRemoveNode={onRemoveNode}
+                            onUpdateNode={onUpdateNode}
+                        />
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+
