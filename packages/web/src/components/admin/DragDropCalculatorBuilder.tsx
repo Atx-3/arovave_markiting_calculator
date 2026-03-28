@@ -34,12 +34,14 @@ const TYPE_ICON: Record<InputType, typeof Hash> = {
     number: Hash,
     dropdown: List,
     fixed: Lock,
+    reference_list: List,
 };
 
 const TYPE_COLOR: Record<InputType, string> = {
     number: 'bg-blue-50 text-blue-600 border-blue-200',
     dropdown: 'bg-purple-50 text-purple-600 border-purple-200',
     fixed: 'bg-amber-50 text-amber-600 border-amber-200',
+    reference_list: 'bg-teal-50 text-teal-600 border-teal-200',
 };
 
 const OPERATORS = [

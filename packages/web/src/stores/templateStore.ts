@@ -1036,7 +1036,6 @@ function evaluateTokens(tokens: FormulaToken[], values: Record<string, Decimal>)
         '*': 2,
         '÷': 2,
         '/': 2,
-        '%': 2,
     };
 
     const applyOp = (op: string, b: Decimal, a: Decimal): Decimal => {
@@ -1045,7 +1044,6 @@ function evaluateTokens(tokens: FormulaToken[], values: Record<string, Decimal>)
             case '-': return a.minus(b);
             case '×': case '*': return a.times(b);
             case '÷': case '/': return b.isZero() ? new Decimal(0) : a.div(b);
-            case '%': return a.times(b).div(100);
             default: return new Decimal(0);
         }
     };
@@ -1090,6 +1088,16 @@ function evaluateTokens(tokens: FormulaToken[], values: Record<string, Decimal>)
                 }
             }
         } else if (token.type === 'operator') {
+            // % is a UNARY POSTFIX operator: divides the preceding value by 100
+            // e.g. "10 * 15 %" → 10 * (15/100) = 1.5
+            if (token.value === '%') {
+                if (outputQueue.length > 0) {
+                    const top = outputQueue.pop()!;
+                    outputQueue.push(top.div(100));
+                }
+                continue; // don't push % onto the operator stack
+            }
+
             while (
                 operatorStack.length > 0 &&
                 operatorStack[operatorStack.length - 1] !== '(' &&
