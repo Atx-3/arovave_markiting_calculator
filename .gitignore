@@ -6,9 +6,6 @@ dist/
 build/
 
 # Environment
-.env
-.env.local
-.env.production
 
 # IDE
 .vscode/
@@ -27,3 +24,4 @@ npm-debug.log*
 
 # Test coverage
 coverage/
+config.bat
