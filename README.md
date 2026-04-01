@@ -315,3 +315,4 @@ On startup, the store hydrates from localStorage first (instant), then fetches t
 ## License
 
 Private — ©2026 Arovave. All rights reserved.
+"# arovave_markiting_calculator" 
