@@ -927,24 +927,36 @@ export const useAppStore = create<AppStore>()(
                     valueMap[`local_${lr.id}`] = safeDecimal(lr.rate);
                 }
 
-                // Evaluate formulas in order
-                const sortedFormulas = [...calc.formulas].sort((a, b) => a.order - b.order);
+                // Evaluate formulas in dependency-aware order.
+                // If Formula B references Formula A via formula_ref, A must be evaluated first.
+                const topoSort = (formulas: typeof calc.formulas) => {
+                    const byId = new Map(formulas.map(f => [f.id, f]));
+                    const visited = new Set<string>();
+                    const result: typeof formulas = [];
 
-                console.log(`[Calc] ── Evaluating ${sortedFormulas.length} formulas for "${calc.name}" ──`);
-                console.log(`[Calc] ValueMap keys:`, Object.keys(valueMap));
+                    const visit = (f: typeof formulas[0]) => {
+                        if (visited.has(f.id)) return;
+                        visited.add(f.id);
+                        // Visit dependencies first
+                        for (const t of f.tokens) {
+                            if (t.type === 'formula_ref' && byId.has(t.value)) {
+                                visit(byId.get(t.value)!);
+                            }
+                        }
+                        result.push(f);
+                    };
+
+                    // Process in display order, but dependencies always come first
+                    const ordered = [...formulas].sort((a, b) => a.order - b.order);
+                    for (const f of ordered) visit(f);
+                    return result;
+                };
+
+                const sortedFormulas = topoSort(calc.formulas);
 
                 for (const formula of sortedFormulas) {
                     try {
-                        // Log what formula_ref tokens will resolve to
-                        for (const t of formula.tokens) {
-                            if (t.type === 'formula_ref') {
-                                const resolved = valueMap[t.value];
-                                console.log(`[Calc] Formula "${formula.label}" refs formula id="${t.value}" (label="${t.label}") → resolved=${resolved?.toString() ?? 'UNDEFINED'}`);
-                            }
-                        }
-
                         let result = evaluateTokens(formula.tokens, valueMap);
-                        console.log(`[Calc] Formula "${formula.label}" (id=${formula.id}, order=${formula.order}) → result=${result.toString()}`);
 
                         if (result.isNaN() || !result.isFinite()) {
                             console.warn(`[Calc] Formula "${formula.label}" (${formula.key}) produced NaN/Infinity, defaulting to 0`);
