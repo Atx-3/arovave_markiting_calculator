@@ -167,11 +167,13 @@ The app will be available at `http://localhost:5173`
 ### 🏗️ Admin Panel (`/admin`)
 
 #### Category Tree
+
 - Unlimited nesting of product categories
 - Drag-to-reorder support
 - Each leaf category can have one calculator assigned
 
 #### Input Hub
+
 Centralized input definitions shared across all calculators:
 
 | Input Type        | Description                                          |
@@ -182,6 +184,7 @@ Centralized input definitions shared across all calculators:
 | **Reference List**| Multilevel tree of categories with leaf-node rates   |
 
 #### Calculator Builder
+
 - **Drag-and-drop** formula construction
 - **Operator support**: `+`, `-`, `×`, `÷`, `%`
 - **Formula chaining**: Reference results of earlier formulas
@@ -191,6 +194,7 @@ Centralized input definitions shared across all calculators:
 - **Preview & Reorder**: Arrange how inputs and formulas appear to users
 
 #### Additional Features
+
 - **Local Rates** — Calculator-specific rate overrides
 - **Profit %** — Auto-add profit margin on subtotal
 - **GST %** — Auto-add tax on (subtotal + profit)
@@ -261,6 +265,7 @@ The app is configured for Vercel deployment:
 ```
 
 **Vercel Settings:**
+
 | Setting           | Value            |
 |-------------------|------------------|
 | Framework Preset  | Vite             |
@@ -309,4 +314,4 @@ On startup, the store hydrates from localStorage first (instant), then fetches t
 
 ## License
 
-Private — © Arovave. All rights reserved.
+Private — ©2026 Arovave. All rights reserved.
