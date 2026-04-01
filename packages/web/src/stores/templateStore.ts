@@ -930,9 +930,22 @@ export const useAppStore = create<AppStore>()(
                 // Evaluate formulas in order
                 const sortedFormulas = [...calc.formulas].sort((a, b) => a.order - b.order);
 
+                console.log(`[Calc] ── Evaluating ${sortedFormulas.length} formulas for "${calc.name}" ──`);
+                console.log(`[Calc] ValueMap keys:`, Object.keys(valueMap));
+
                 for (const formula of sortedFormulas) {
                     try {
+                        // Log what formula_ref tokens will resolve to
+                        for (const t of formula.tokens) {
+                            if (t.type === 'formula_ref') {
+                                const resolved = valueMap[t.value];
+                                console.log(`[Calc] Formula "${formula.label}" refs formula id="${t.value}" (label="${t.label}") → resolved=${resolved?.toString() ?? 'UNDEFINED'}`);
+                            }
+                        }
+
                         let result = evaluateTokens(formula.tokens, valueMap);
+                        console.log(`[Calc] Formula "${formula.label}" (id=${formula.id}, order=${formula.order}) → result=${result.toString()}`);
+
                         if (result.isNaN() || !result.isFinite()) {
                             console.warn(`[Calc] Formula "${formula.label}" (${formula.key}) produced NaN/Infinity, defaulting to 0`);
                             formulaResults[formula.key] = '0';
