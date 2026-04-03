@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
     Calculator,
     ChevronRight,
@@ -56,8 +56,11 @@ export function SalesCalculator() {
     const [focusedInputId, setFocusedInputId] = useState<string | null>(null);
     const [focusedSourceId, setFocusedSourceId] = useState<string | null>(null); // calc or charge id
     const [refTreePath, setRefTreePath] = useState<string[]>([]);
+    const [refHighlightIndex, setRefHighlightIndex] = useState(-1);
     // GST toggle
     const [includeGst, setIncludeGst] = useState(true);
+    // Total quantity for cost per piece
+    const [totalQuantity, setTotalQuantity] = useState('');
     // Quotation modal
     const [showQuotationModal, setShowQuotationModal] = useState(false);
 
@@ -284,6 +287,81 @@ export function SalesCalculator() {
         ? inputDefinitions.find((i) => i.id === focusedInputId)
         : null;
 
+    // Compute current tree nodes for keyboard navigation
+    const refTreeCurrentNodes = useMemo(() => {
+        if (!focusedInputDef?.refTree?.nodes) return [];
+        let nodes = focusedInputDef.refTree.nodes;
+        for (const pathId of refTreePath) {
+            const found = nodes.find((n) => n.id === pathId);
+            if (found && found.children) nodes = found.children;
+            else break;
+        }
+        return nodes;
+    }, [focusedInputDef, refTreePath]);
+
+    // Reset highlight when sidebar content changes
+    useEffect(() => {
+        setRefHighlightIndex(-1);
+    }, [focusedInputId, refTreePath]);
+
+    // Keyboard handler for reference navigation
+    const handleRefKeyDown = useCallback((e: React.KeyboardEvent) => {
+        if (!focusedInputDef || !focusedSourceId) return;
+
+        const refItems = focusedInputDef.referenceItems || [];
+        const hasTree = focusedInputDef.refTree?.nodes && focusedInputDef.refTree.nodes.length > 0;
+        const hasFlat = !hasTree && refItems.length > 0;
+        const itemCount = hasTree ? refTreeCurrentNodes.length : hasFlat ? refItems.length : 0;
+        if (itemCount === 0) return;
+
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            setRefHighlightIndex((prev) => Math.min(prev + 1, itemCount - 1));
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            setRefHighlightIndex((prev) => Math.max(prev - 1, 0));
+        } else if (e.key === 'Enter' && refHighlightIndex >= 0 && refHighlightIndex < itemCount) {
+            e.preventDefault();
+            const isMainCalc = focusedSourceId === currentCalc?.id;
+
+            if (hasTree) {
+                const node = refTreeCurrentNodes[refHighlightIndex];
+                const isLeaf = !node.children || node.children.length === 0;
+                if (isLeaf && node.rate) {
+                    if (isMainCalc) {
+                        setMainInputs((prev) => ({ ...prev, [focusedInputDef.key]: node.rate! }));
+                    } else {
+                        setChargeInput(focusedSourceId, focusedInputDef.key, node.rate!);
+                    }
+                    setFocusedInputId(null);
+                    setFocusedSourceId(null);
+                    setRefTreePath([]);
+                } else if (!isLeaf) {
+                    setRefTreePath((prev) => [...prev, node.id]);
+                }
+            } else if (hasFlat) {
+                const item = refItems[refHighlightIndex];
+                if (isMainCalc) {
+                    setMainInputs((prev) => ({ ...prev, [focusedInputDef.key]: item.value }));
+                } else {
+                    setChargeInput(focusedSourceId, focusedInputDef.key, item.value);
+                }
+                setFocusedInputId(null);
+                setFocusedSourceId(null);
+                setRefTreePath([]);
+            }
+        } else if (e.key === 'ArrowRight' && hasTree && refHighlightIndex >= 0) {
+            const node = refTreeCurrentNodes[refHighlightIndex];
+            if (node.children && node.children.length > 0) {
+                e.preventDefault();
+                setRefTreePath((prev) => [...prev, node.id]);
+            }
+        } else if (e.key === 'ArrowLeft' && hasTree && refTreePath.length > 0) {
+            e.preventDefault();
+            setRefTreePath((prev) => prev.slice(0, -1));
+        }
+    }, [focusedInputDef, focusedSourceId, refTreeCurrentNodes, refHighlightIndex, refTreePath, currentCalc, setChargeInput]);
+
     // Which categories to show at current level
     const displayChildren = currentCategoryId ? children : rootCategories;
 
@@ -428,7 +506,13 @@ export function SalesCalculator() {
                                         setFocusedSourceId(currentCalc.id);
                                         setRefTreePath([]);
                                     }}
+                                    onBlurInput={() => {
+                                        setFocusedInputId(null);
+                                        setFocusedSourceId(null);
+                                        setRefTreePath([]);
+                                    }}
                                     focusedInputId={focusedSourceId === currentCalc.id ? focusedInputId : null}
+                                    onInputKeyDown={handleRefKeyDown}
                                 />
 
                                 {/* ═══ ACTIVE CHARGES (expanded) ═══ */}
@@ -458,7 +542,13 @@ export function SalesCalculator() {
                                                 setFocusedSourceId(charge.id);
                                                 setRefTreePath([]);
                                             }}
+                                            onBlurInput={() => {
+                                                setFocusedInputId(null);
+                                                setFocusedSourceId(null);
+                                                setRefTreePath([]);
+                                            }}
                                             focusedInputId={focusedSourceId === charge.id ? focusedInputId : null}
+                                            onInputKeyDown={handleRefKeyDown}
                                         />
                                     );
                                 })}
@@ -689,6 +779,34 @@ export function SalesCalculator() {
                                                 ₹{displayGrandTotal.toFixed(2)}
                                             </span>
                                         </div>
+
+                                        {/* Cost per piece */}
+                                        <div className="border-t border-emerald-200/60 pt-3 mt-1">
+                                            <div className="flex items-center justify-between gap-3">
+                                                <label className="text-xs font-semibold text-emerald-700/70 whitespace-nowrap">Total Quantity</label>
+                                                <input
+                                                    type="text"
+                                                    inputMode="decimal"
+                                                    value={totalQuantity}
+                                                    onChange={(e) => {
+                                                        const v = e.target.value.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+                                                        setTotalQuantity(v);
+                                                    }}
+                                                    placeholder="Qty"
+                                                    className="w-24 text-right text-sm font-mono font-semibold text-emerald-800 bg-emerald-100/50 border border-emerald-200 rounded-lg px-2.5 py-1.5 outline-none focus:ring-2 focus:ring-emerald-300 placeholder:text-emerald-400/50"
+                                                />
+                                            </div>
+                                            {totalQuantity && parseFloat(totalQuantity) > 0 && (
+                                                <div className="flex items-center justify-between mt-2 px-1">
+                                                    <span className="text-sm font-semibold text-emerald-700 flex items-center gap-1.5">
+                                                        💰 Cost per Piece
+                                                    </span>
+                                                    <span className="text-lg font-mono font-bold text-emerald-800">
+                                                        ₹{(displayGrandTotal / parseFloat(totalQuantity)).toFixed(2)}
+                                                    </span>
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
 
                                     {/* Quotation Actions */}
@@ -717,22 +835,12 @@ export function SalesCalculator() {
                     {focusedInputDef && focusedSourceId && (() => {
                         const refItems = focusedInputDef.referenceItems || [];
                         const refTree = focusedInputDef.refTree;
-                        const hasAnything = refItems.length > 0 || refTree;
+                        const hasAnything = refItems.length > 0 || (refTree && refTree.nodes && refTree.nodes.length > 0);
 
                         if (!hasAnything) return null;
 
-                        // Tree navigation
-                        let treeCurrentNodes: RefTreeNode[] = [];
-                        if (refTree) {
-                            let nodes = refTree.nodes;
-                            for (let i = 0; i < refTreePath.length; i++) {
-                                const found = nodes.find((n) => n.id === refTreePath[i]);
-                                if (found) {
-                                    nodes = found.children || [];
-                                } else break;
-                            }
-                            treeCurrentNodes = nodes;
-                        }
+                        // Tree navigation — use pre-computed nodes
+                        const treeCurrentNodes = refTreeCurrentNodes;
 
                         const treeBreadcrumb: { id: string; name: string }[] = [];
                         if (refTree) {
@@ -758,7 +866,7 @@ export function SalesCalculator() {
                         };
 
                         return (
-                            <div className="w-64 shrink-0">
+                            <div className="w-64 shrink-0" onMouseDown={(e) => e.preventDefault()}>
                                 <div className="glass rounded-2xl p-4 space-y-3 sticky top-20">
                                     <div className="flex items-center justify-between">
                                         <h3 className="text-sm font-semibold text-black">
@@ -806,9 +914,10 @@ export function SalesCalculator() {
                                             )}
 
                                             <div className="space-y-1">
-                                                {treeCurrentNodes.map((node) => {
+                                                {treeCurrentNodes.map((node, idx) => {
                                                     const isLeaf = !node.children || node.children.length === 0;
                                                     const hasRate = !!node.rate;
+                                                    const isHighlighted = idx === refHighlightIndex;
 
                                                     return (
                                                         <button
@@ -824,11 +933,13 @@ export function SalesCalculator() {
                                                                 }
                                                             }}
                                                             disabled={isLeaf && !hasRate}
-                                                            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-colors ${isLeaf && hasRate && currentInputs[focusedInputDef.key] === node.rate
-                                                                ? 'bg-black/[0.06] ring-1 ring-black/10'
-                                                                : isLeaf && !hasRate
-                                                                    ? 'opacity-40 cursor-not-allowed'
-                                                                    : 'hover:bg-white'
+                                                            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-colors ${isHighlighted
+                                                                ? 'bg-blue-50 ring-1 ring-blue-200'
+                                                                : isLeaf && hasRate && currentInputs[focusedInputDef.key] === node.rate
+                                                                    ? 'bg-black/[0.06] ring-1 ring-black/10'
+                                                                    : isLeaf && !hasRate
+                                                                        ? 'opacity-40 cursor-not-allowed'
+                                                                        : 'hover:bg-white'
                                                                 }`}
                                                         >
                                                             <span className="text-black font-medium">
@@ -855,7 +966,7 @@ export function SalesCalculator() {
                                                 Click to fill {focusedInputDef.name}:
                                             </p>
                                             <div className="space-y-1">
-                                                {refItems.map((item) => (
+                                                {refItems.map((item, idx) => (
                                                     <button
                                                         key={item.id}
                                                         onClick={() => {
@@ -864,9 +975,11 @@ export function SalesCalculator() {
                                                         setFocusedSourceId(null);
                                                         setRefTreePath([]);
                                                     }}
-                                                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-colors ${currentInputs[focusedInputDef.key] === item.value
-                                                            ? 'bg-black/[0.06] ring-1 ring-black/10'
-                                                            : 'hover:bg-white'
+                                                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-colors ${idx === refHighlightIndex
+                                                            ? 'bg-blue-50 ring-1 ring-blue-200'
+                                                            : currentInputs[focusedInputDef.key] === item.value
+                                                                ? 'bg-black/[0.06] ring-1 ring-black/10'
+                                                                : 'hover:bg-white'
                                                             }`}
                                                     >
                                                         <span className="text-black font-medium">
@@ -890,13 +1003,57 @@ export function SalesCalculator() {
             {/* ═══ QUOTATION MODAL ═══ */}
             {
                 showQuotationModal && currentCalc && mainResult && (() => {
-                    // Build quotation line items — profit is merged into amounts
+                    // Helper: build description for a calculator/charge from its inputs
+                    const buildItemDescription = (
+                        calc: typeof currentCalc,
+                        inputs: Record<string, string>,
+                        dropdowns: Record<string, string>,
+                    ): string => {
+                        const tokenInputIds = new Set(
+                            calc.formulas.flatMap((f) => f.tokens.filter((t) => t.type === 'input').map((t) => t.value))
+                        );
+                        const usedDefs = inputDefinitions
+                            .filter((i) => tokenInputIds.has(i.id))
+                            .sort((a, b) => calc.usedInputIds.indexOf(a.id) - calc.usedInputIds.indexOf(b.id));
+
+                        const parts: string[] = [];
+                        for (const def of usedDefs) {
+                            if (def.hidden) continue;
+                            let value = '';
+                            if (def.type === 'number') {
+                                value = inputs[def.key] || '';
+                            } else if (def.type === 'dropdown') {
+                                const selVal = dropdowns[def.key] || '';
+                                const opt = def.dropdownOptions?.find((o) => o.value === selVal);
+                                value = opt ? opt.label : selVal;
+                            } else if (def.type === 'fixed') {
+                                value = def.fixedValue || '0';
+                            } else if (def.type === 'reference_list') {
+                                const pathJson = dropdowns[def.key] || '';
+                                if (pathJson) {
+                                    try {
+                                        const parsed = JSON.parse(pathJson);
+                                        value = parsed.label || parsed.value || pathJson;
+                                    } catch {
+                                        value = pathJson;
+                                    }
+                                }
+                            }
+                            if (value) {
+                                parts.push(`${def.name}: ${value}`);
+                            }
+                        }
+                        return parts.join(' | ');
+                    };
+
+                    // Build quotation line items with descriptions
                     const items: QuotationLineItem[] = [];
 
                     // Main calculator
                     items.push({
                         label: currentCalc.name,
-                        amount: mainResult.afterDiscount,     // profit merged, discount applied
+                        description: buildItemDescription(currentCalc, mainInputs, mainDropdowns),
+                        amount: mainResult.afterDiscount,
                         gstPercent: parseFloat(currentCalc.gstPercent || '0') || 0,
                         gstAmount: mainResult.gstAmount,
                         finalAmount: mainResult.finalAmount,
@@ -908,7 +1065,8 @@ export function SalesCalculator() {
                         if (r) {
                             items.push({
                                 label: charge.name,
-                                amount: r.afterDiscount,          // profit merged, discount applied
+                                description: buildItemDescription(charge, chargeInputs[charge.id] || {}, chargeDropdowns[charge.id] || {}),
+                                amount: r.afterDiscount,
                                 gstPercent: parseFloat(charge.gstPercent || '0') || 0,
                                 gstAmount: r.gstAmount,
                                 finalAmount: r.finalAmount,
@@ -964,7 +1122,9 @@ function CalcSection({
     onToggleCollapse,
     onRemove,
     onFocusInput,
+    onBlurInput,
     focusedInputId,
+    onInputKeyDown,
 }: {
     calc: CalcType;
     label: string;
@@ -991,7 +1151,9 @@ function CalcSection({
     onToggleCollapse?: () => void;
     onRemove?: () => void;
     onFocusInput: (id: string) => void;
+    onBlurInput: () => void;
     focusedInputId: string | null;
+    onInputKeyDown?: (e: React.KeyboardEvent) => void;
 }) {
     // Derive actually-used input IDs from formula tokens (not stale usedInputIds)
     const tokenInputIds = new Set(
@@ -1093,10 +1255,14 @@ function CalcSection({
                                                 : 'border-black/10 focus:ring-black/10'
                                                 }`}
                                             onFocus={() => {
-                                                if (inputDef.referenceItems?.length || inputDef.refTree) {
+                                                const hasRefItems = inputDef.referenceItems && inputDef.referenceItems.length > 0;
+                                                const hasRefTree = inputDef.refTree && inputDef.refTree.nodes && inputDef.refTree.nodes.length > 0;
+                                                if (hasRefItems || hasRefTree) {
                                                     onFocusInput(inputDef.id);
                                                 }
                                             }}
+                                            onBlur={() => onBlurInput()}
+                                            onKeyDown={(e) => onInputKeyDown?.(e)}
                                         />
                                     )}
 
