@@ -56,6 +56,8 @@ export function SalesCalculator() {
     const [focusedInputId, setFocusedInputId] = useState<string | null>(null);
     const [focusedSourceId, setFocusedSourceId] = useState<string | null>(null); // calc or charge id
     const [refTreePath, setRefTreePath] = useState<string[]>([]);
+    // GST toggle
+    const [includeGst, setIncludeGst] = useState(true);
     // Quotation modal
     const [showQuotationModal, setShowQuotationModal] = useState(false);
 
@@ -213,6 +215,25 @@ export function SalesCalculator() {
         return total;
     }, [mainResult, chargeResults, extraChargesTotal]);
 
+    // Sum excluding GST (afterDiscount values, no GST added)
+    const afterSectionDiscountsExGst = useMemo(() => {
+        let total = mainResult?.afterDiscount || 0;
+        for (const r of Object.values(chargeResults)) {
+            total += r.afterDiscount;
+        }
+        total += extraChargesTotal;
+        return total;
+    }, [mainResult, chargeResults, extraChargesTotal]);
+
+    // Total GST amount across all sections
+    const totalGstAmount = useMemo(() => {
+        let gst = mainResult?.gstAmount || 0;
+        for (const r of Object.values(chargeResults)) {
+            gst += r.gstAmount;
+        }
+        return gst;
+    }, [mainResult, chargeResults]);
+
     // Grand total discount (applied on sum — mathematically equivalent to pre-GST)
     const grandDiscountAmount = useMemo(() => {
         if (!currentCalc?.enableGrandDiscount) return 0;
@@ -226,8 +247,25 @@ export function SalesCalculator() {
         return 0;
     }, [currentCalc, grandDiscountInput, afterSectionDiscounts]);
 
+    // Grand discount excluding GST
+    const grandDiscountAmountExGst = useMemo(() => {
+        if (!currentCalc?.enableGrandDiscount) return 0;
+        const max = parseFloat(currentCalc.grandDiscountMaxPercent || '0') || 0;
+        const min = parseFloat(currentCalc.grandDiscountMinPercent || '0') || 0;
+        if (max <= 0) return 0;
+        const val = parseFloat(grandDiscountInput || '0') || 0;
+        if (val >= min && val <= max && grandDiscountInput !== '') {
+            return afterSectionDiscountsExGst * (val / 100);
+        }
+        return 0;
+    }, [currentCalc, grandDiscountInput, afterSectionDiscountsExGst]);
+
     // Grand total = after section discounts - grand discount
     const grandTotal = afterSectionDiscounts - grandDiscountAmount;
+    const grandTotalExGst = afterSectionDiscountsExGst - grandDiscountAmountExGst;
+
+    // Display grand total based on GST toggle
+    const displayGrandTotal = includeGst ? grandTotal : grandTotalExGst;
 
     // ── Loading guard (AFTER all hooks to comply with React rules) ──
     if (!syncReady) {
@@ -587,17 +625,70 @@ export function SalesCalculator() {
                                         );
                                     })()}
 
-                                    {/* Grand Total */}
-                                    <div className={`px-5 ${(activeCharges.length > 0 || extraCharges.some((ec) => parseFloat(ec.amount) > 0) || totalDiscountAmount > 0 || grandDiscountAmount > 0) ? 'pt-1 pb-4' : 'py-4'} flex items-center justify-between`}>
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-emerald-500 text-lg">🏆</span>
-                                            <span className="text-lg font-bold text-emerald-800">
-                                                Grand Total
+                                    {/* GST Toggle + Grand Total */}
+                                    <div className={`px-5 ${(activeCharges.length > 0 || extraCharges.some((ec) => parseFloat(ec.amount) > 0) || totalDiscountAmount > 0 || grandDiscountAmount > 0) ? 'pt-1' : 'pt-4'} pb-2`}>
+                                        {/* GST Toggle Button */}
+                                        {totalGstAmount > 0 && (
+                                            <div className="flex items-center justify-between mb-3">
+                                                <span className="text-xs font-semibold text-emerald-600">GST</span>
+                                                <button
+                                                    onClick={() => setIncludeGst((prev) => !prev)}
+                                                    className={`relative inline-flex h-7 w-[120px] items-center rounded-full transition-colors duration-200 ${
+                                                        includeGst ? 'bg-emerald-500' : 'bg-black/15'
+                                                    }`}
+                                                >
+                                                    <span
+                                                        className={`absolute left-1.5 text-[10px] font-bold transition-opacity duration-200 ${
+                                                            includeGst ? 'text-white/80 opacity-100' : 'opacity-0'
+                                                        }`}
+                                                    >
+                                                        INCLUDED
+                                                    </span>
+                                                    <span
+                                                        className={`absolute right-1.5 text-[10px] font-bold transition-opacity duration-200 ${
+                                                            !includeGst ? 'text-black/40 opacity-100' : 'opacity-0'
+                                                        }`}
+                                                    >
+                                                        EXCLUDED
+                                                    </span>
+                                                    <span
+                                                        className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition-transform duration-200 ${
+                                                            includeGst ? 'translate-x-[93px]' : 'translate-x-[3px]'
+                                                        }`}
+                                                    />
+                                                </button>
+                                            </div>
+                                        )}
+
+                                        {/* GST amount row when included */}
+                                        {includeGst && totalGstAmount > 0 && (
+                                            <div className="flex items-center justify-between text-sm mb-2">
+                                                <span className="text-emerald-600/70 font-medium">GST Amount</span>
+                                                <span className="font-mono font-semibold text-emerald-600">
+                                                    ₹{totalGstAmount.toFixed(2)}
+                                                </span>
+                                            </div>
+                                        )}
+
+                                        {/* Grand Total */}
+                                        <div className="flex items-center justify-between pb-2">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-emerald-500 text-lg">🏆</span>
+                                                <div>
+                                                    <span className="text-lg font-bold text-emerald-800">
+                                                        Grand Total
+                                                    </span>
+                                                    {totalGstAmount > 0 && (
+                                                        <span className="block text-[10px] text-emerald-600/50 font-medium -mt-0.5">
+                                                            {includeGst ? 'incl. GST' : 'excl. GST'}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                            <span className="text-xl font-mono font-bold text-emerald-700">
+                                                ₹{displayGrandTotal.toFixed(2)}
                                             </span>
                                         </div>
-                                        <span className="text-xl font-mono font-bold text-emerald-700">
-                                            ₹{grandTotal.toFixed(2)}
-                                        </span>
                                     </div>
 
                                     {/* Quotation Actions */}
@@ -725,6 +816,9 @@ export function SalesCalculator() {
                                                             onClick={() => {
                                                                 if (isLeaf && hasRate) {
                                                                     handleSelectValue(node.rate!);
+                                                                    setFocusedInputId(null);
+                                                                    setFocusedSourceId(null);
+                                                                    setRefTreePath([]);
                                                                 } else if (!isLeaf) {
                                                                     setRefTreePath([...refTreePath, node.id]);
                                                                 }
@@ -764,7 +858,12 @@ export function SalesCalculator() {
                                                 {refItems.map((item) => (
                                                     <button
                                                         key={item.id}
-                                                        onClick={() => handleSelectValue(item.value)}
+                                                        onClick={() => {
+                                                        handleSelectValue(item.value);
+                                                        setFocusedInputId(null);
+                                                        setFocusedSourceId(null);
+                                                        setRefTreePath([]);
+                                                    }}
                                                         className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm transition-colors ${currentInputs[focusedInputDef.key] === item.value
                                                             ? 'bg-black/[0.06] ring-1 ring-black/10'
                                                             : 'hover:bg-white'
