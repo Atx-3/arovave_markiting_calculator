@@ -6,8 +6,6 @@ dist/
 build/
 
 # Environment
-.env
-.env.local
 .env.*.local
 # IDE
 .vscode/
